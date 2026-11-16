@@ -1,0 +1,32 @@
+name=K8 My Drive
+summary=Switches My Drive suspension, steering and powertrain by speed, corners and accelerator.
+tab=Tab
+choice_tab_susp=Suspension
+choice_tab_steer=Steering
+choice_tab_eng=Engine
+st=Auto switching
+now=Now susp/steering/engine (switches)
+sp=Speed / lateral G / accelerator
+s_on=[Suspension] auto Eco/Sport
+s_up=[Suspension] firm above (km/h, 0 = off)
+s_hy=[Suspension] margin when slowing (km/h)
+s_co=[Suspension] corner on (0.01 g, 0 = off)
+s_cf=[Suspension] corner off (0.01 g)
+s_dw=[Suspension] minimum hold (s)
+s_eng=[Suspension] sport also sets engine sport
+s_str=[Suspension] sport also sets steering sport
+h_on=[Steering] auto Normal/Sport
+h_up=[Steering] sport above (km/h, 0 = off)
+h_hy=[Steering] margin when slowing (km/h)
+h_co=[Steering] corner on (0.01 g, 0 = off)
+h_cf=[Steering] corner off (0.01 g)
+h_dw=[Steering] minimum hold (s)
+e_on=[Engine] auto Eco/Sport by accelerator
+e_pd=[Engine] sport at accelerator (%)
+e_hd=[Engine] back to Eco after (s)
+e_sus=[Engine] sport also sets suspension sport
+e_str=[Engine] sport also sets steering sport
+mx=Max switches per minute (each item)
+cf=Settings
+save_log=Save log to USB
+need_engine=The engine is not running. Turn on the "K8 My Drive engine" module and restart the head unit once

@@ -1,0 +1,5 @@
+name=K8 My Drive engine
+summary=Switching engine for the K8 My Drive card
+ver=Engine version
+st=Auto switching
+note=Turn on and restart the head unit once to start the engine. Change settings in the K8 My Drive card.

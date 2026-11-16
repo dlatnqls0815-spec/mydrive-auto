@@ -1,0 +1,6 @@
+private/
+captures/
+.tools/
+build/
+*.apk
+*.dex
