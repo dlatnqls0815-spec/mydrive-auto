@@ -31,7 +31,9 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.HashMap;
 import java.util.Locale;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -43,7 +45,7 @@ import java.util.UUID;
  * moving forward. Settings over 127.0.0.1 TCP (head unit app) and Bluetooth RFCOMM (phone).
  */
 public final class CarMain {
-    static final String VERSION = "0.3.6";
+    static final String VERSION = "0.4.2";
     /** BCM getSpeed_KMHUnit() returns the display speed raw value in 0.5 km/h steps (65 = 32.5 km/h on the cluster). */
     static final float BCM_SPEED_RAW_PER_KMH = 2f;
     static final String LOG_DIR = "/data/nemesis/logs/k8ecs.damping";
@@ -164,6 +166,7 @@ public final class CarMain {
             if (fb == null) throw new IOException("layout");
             synchronized (lock) {
                 for (Channel c : channels()) {
+                    c.lastFb = fb[c.item];
                     int step = c.stepFromFeedback(fb[c.item]);
                     Log.i(c.name + " at start: feedback " + fb[c.item] + " = " + c.stepName(step));
                     if (step == 0 || step == 1) { c.carStep = step; deciderLevel(c, step); }
@@ -198,6 +201,18 @@ public final class CarMain {
                 if (tok.startsWith("myDriveSlot=")) {
                     try { savedSlot = Integer.parseInt(tok.substring(12)); } catch (NumberFormatException ignored) { }
                 }
+                if (tok.startsWith("feedbackMap=")) {
+                    for (String kv : tok.substring(12).split(",")) {
+                        int colon = kv.indexOf(':');
+                        int dot = kv.indexOf('.');
+                        if (colon < 0 || dot < 0) continue;
+                        try {
+                            int item = Integer.parseInt(kv.substring(0, dot));
+                            int f = Integer.parseInt(kv.substring(colon + 1));
+                            for (Channel c : channels()) if (c.item == item) c.learned.put(kv.substring(0, colon), f);
+                        } catch (NumberFormatException ignored) { }
+                    }
+                }
                 if (tok.startsWith("accelAxes02=")) {
                     try { savedAccelAngle = Double.parseDouble(tok.substring(12)); } catch (NumberFormatException ignored) { }
                 }
@@ -219,9 +234,19 @@ public final class CarMain {
             Settings next = Settings.parse(pairs, settings);
             Files.write(new File(DIR, "config.txt"), next.encode().replace(' ', '\n') + "\n");
             settings = next;
+            String low = eng.name0;
             buildControllersLocked(next);
             gyro.setManualScale(next.gyroScale);
             Log.i("settings " + next.encode());
+            if (!low.equals(eng.name0)) {
+                // Eco/Normal choice changed: read the powertrain item again so its step uses the new mapping.
+                try {
+                    int[] fb = Binder.feedbacks(Binder.service("com.hkmc.micom.system"));
+                    if (fb != null) onFeedbackLocked(eng, fb[eng.item]);
+                } catch (Exception e) {
+                    Log.i("powertrain re-read failed: " + e);
+                }
+            }
             return next.encode();
         }
     }
@@ -235,6 +260,10 @@ public final class CarMain {
         controller = new DampingController(s.toRules());
         steerController = new DampingController(s.steerRules());
         pedalController = new PedalController(s.engPedalPct, s.engHoldMs, s.maxPerMinute);
+        if (eng.setLow(s.engNormal)) {
+            Log.i("powertrain low step " + eng.name0 + " (value " + eng.value0 + ", feedback " + eng.fb0 + ")");
+            eng.carStep = -1; // re-read from the next feedback with the new mapping
+        }
         for (Channel c : channels()) {
             c.clearHalt();
             if (c.carStep == 0 || c.carStep == 1) deciderLevel(c, c.carStep);
@@ -346,6 +375,11 @@ public final class CarMain {
         if (accel.oriented()) b.append("accelAxes02=").append(accel.angle()).append(' ');
         if (slot > 0) b.append("myDriveSlot=").append(slot).append(' ');
         if (mode > 0) b.append("driveMode=").append(mode).append(' ');
+        StringBuilder fm = new StringBuilder();
+        for (Channel c : channels())
+            for (Map.Entry<String, Integer> e : c.learned.entrySet())
+                fm.append(fm.length() > 0 ? "," : "").append(e.getKey()).append(':').append(e.getValue());
+        if (fm.length() > 0) b.append("feedbackMap=").append(fm).append(' ');
         Files.write(new File(DIR, "state.txt"), b.toString().trim() + "\n");
     }
 
@@ -444,7 +478,24 @@ public final class CarMain {
 
     void onFeedbackLocked(Channel c, int fb) {
         long now = System.currentTimeMillis();
+        int prev = c.lastFb;
+        c.lastFb = fb;
         int step = c.stepFromFeedback(fb);
+        if (c.pendingStep >= 0) {
+            int want = c.pendingStep;
+            boolean moved = fb != c.fbAtSend && fb != c.fbFor(1 - want);
+            if (step == want || (step == 9 || !c.confirmed(want)) && moved) {
+                // The car changed in answer to our command: this is what it reports for that step.
+                // Only an actual change teaches; a value that was already there proves nothing.
+                if (fb != c.fbAtSend && (!c.confirmed(want) || c.fbFor(want) != fb)) {
+                    c.learned.put(c.key(want), fb);
+                    Log.i("learned " + c.name + " " + c.stepName(want) + " = feedback " + fb);
+                    saveStateLocked();
+                }
+                step = want;
+            }
+        }
+        if (fb == prev && step == c.carStep && c.pendingStep < 0) return; // nothing new for this item
         if (step != c.carStep) Log.i("car " + c.name + " " + c.stepName(step) + (step == 9 ? " (" + fb + ")" : ""));
         c.carStep = step;
         if (c.pendingStep >= 0) {
@@ -460,7 +511,10 @@ public final class CarMain {
         } else if (step == 0 || step == 1) {
             deciderLevel(c, step); // driver changed it on the screen
         }
-        if (step == 9 && channelOn(c) && !c.halted) haltLocked(c, "unexpected value " + fb);
+        // An unknown value halts only once both steps are known on this car; before that it may be a value
+        // the car starts in (other models), and the first command will teach the mapping.
+        if (step == 9 && channelOn(c) && !c.halted && c.confirmed(0) && c.confirmed(1))
+            haltLocked(c, "unexpected value " + fb);
     }
 
     // ---------- control loop ----------
@@ -517,24 +571,25 @@ public final class CarMain {
                             settings.engOn);
                     if (s1 != DampingController.NO_COMMAND) {
                         sendCh[n] = susp; sendStep[n] = s1;
-                        sendWhy[n++] = suspLinked && controller.ownLevel() < 1 && s1 == 1 ? "link from engine"
+                        sendWhy[n++] = !moving ? "stopped" : suspLinked && controller.ownLevel() < 1 && s1 == 1 ? "link from engine"
                                 : controller.isCornerActive() ? "corner " + lateralMilliG + "mg" : "speed " + kmh + "km/h";
                     }
                     if (s2 != DampingController.NO_COMMAND) {
                         sendCh[n] = steer; sendStep[n] = s2;
-                        sendWhy[n++] = steerLinked && steerController.ownLevel() < 1 && s2 == 1
+                        sendWhy[n++] = !moving ? "stopped" : steerLinked && steerController.ownLevel() < 1 && s2 == 1
                                 ? (settings.engLinkSteer && engWants ? "link from engine" : "link from suspension")
                                 : steerController.isCornerActive() ? "corner " + lateralMilliG + "mg" : "speed " + kmh + "km/h";
                     }
                     if (s3 != PedalController.NO_COMMAND) {
                         sendCh[n] = eng; sendStep[n] = s3;
-                        sendWhy[n++] = engLinked && !pedalController.isSportWanted(now) && s3 == 1 ? "link from suspension"
+                        sendWhy[n++] = !moving ? "stopped" : engLinked && !pedalController.isSportWanted(now) && s3 == 1 ? "link from suspension"
                                 : "pedal " + Math.round(pedalPct) + "%";
                     }
                     for (int i = 0; i < n; i++) {
                         Channel c = sendCh[i];
                         c.pendingStep = sendStep[i];
                         c.pendingSinceMs = now;
+                        c.fbAtSend = c.lastFb;
                         c.sent++;
                         c.lastReason = sendWhy[i];
                     }
@@ -688,6 +743,7 @@ public final class CarMain {
     }
 
     void serveTcp() {
+        String lastError = null;
         while (true) {
             ServerSocket server = null;
             try {
@@ -703,7 +759,9 @@ public final class CarMain {
                     });
                 }
             } catch (IOException e) {
-                Log.i("tcp error " + e);
+                // A boot-started NEMESIS service gets EACCES every time; the head unit app uses the local socket.
+                if (!String.valueOf(e).equals(lastError)) Log.i("tcp error " + e + " (logged once)");
+                lastError = String.valueOf(e);
             } finally {
                 if (server != null) try { server.close(); } catch (IOException ignored) { }
             }
@@ -833,9 +891,17 @@ public final class CarMain {
     /** One My Drive item: its command values, the feedback it reports, and the send/feedback bookkeeping. */
     static final class Channel {
         final String name;
-        final int item, value0, value1, fb0, fb1;
-        final String name0, name1;
+        final int item, value1, fb1;
+        final String name1;
+        int value0, fb0;   // the low step; the powertrain one switches between Eco and Normal
+        String name0;
         int carStep = -1, pendingStep = -1, mismatches, sent;
+        int lastFb = -1, fbAtSend = -1;
+        /**
+         * Feedback learned on this car, keyed "item.value" (value = what is sent). Other Hyundai/Kia cars may
+         * answer with other feedback numbers than the K8; the first answer to each value is remembered.
+         */
+        Map<String, Integer> learned = new HashMap<String, Integer>();
         long pendingSinceMs;
         String lastReason = "-";
         boolean halted;
@@ -845,7 +911,28 @@ public final class CarMain {
             this.fb0 = fb0; this.fb1 = fb1; this.name0 = name0; this.name1 = name1;
         }
 
-        int stepFromFeedback(int fb) { return fb == fb0 ? 0 : fb == fb1 ? 1 : 9; }
+        /**
+         * Powertrain low step: Eco (value 2, feedback 4, confirmed on the hybrid K8) or Normal (value 0;
+         * feedback 2 as on the steering and suspension items, not yet seen on a powertrain). Returns true if changed.
+         */
+        boolean setLow(boolean normal) {
+            int v = normal ? 0 : 2, f = normal ? 2 : 4;
+            if (v == value0 && f == fb0) return false;
+            value0 = v; fb0 = f; name0 = normal ? "normal" : "eco";
+            return true;
+        }
+
+        int value(int step) { return step == 1 ? value1 : value0; }
+        String key(int step) { return item + "." + value(step); }
+        boolean confirmed(int step) { return learned.containsKey(key(step)); }
+        int fbFor(int step) {
+            Integer f = learned.get(key(step));
+            return f != null ? f : step == 1 ? fb1 : fb0;
+        }
+        int stepFromFeedback(int fb) {
+            int f0 = fbFor(0), f1 = fbFor(1);
+            return fb == f0 && f0 != f1 ? 0 : fb == f1 && f0 != f1 ? 1 : 9;
+        }
         String stepName(int s) { return s == 0 ? name0 : s == 1 ? name1 : s == 9 ? "other" : "unknown"; }
         void clearHalt() { halted = false; mismatches = 0; pendingStep = -1; }
     }

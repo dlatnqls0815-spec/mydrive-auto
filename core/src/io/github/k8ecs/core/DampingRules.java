@@ -42,7 +42,7 @@ public final class DampingRules {
             throw new IllegalArgumentException("corner thresholds");
         }
         if (cornerLevel < 0 || cornerLevel >= levelCount) throw new IllegalArgumentException("cornerLevel");
-        if (minDwellMs < 1000 || maxSwitchesPerMinute < 1 || maxSwitchesPerMinute > 20) {
+        if (minDwellMs < 1000 || maxSwitchesPerMinute < 0 || maxSwitchesPerMinute > 20) {  // 0 = no per-minute cap
             throw new IllegalArgumentException("rate limits");
         }
         this.levelCount = levelCount;

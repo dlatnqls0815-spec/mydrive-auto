@@ -33,7 +33,7 @@ _EXTRA = ROOT / "private" / "release-forbidden.txt"
 if _EXTRA.is_file():
     FORBIDDEN += [re.compile(re.escape(l.strip().encode())) for l in _EXTRA.read_text(encoding="utf-8").splitlines() if l.strip()]
 
-GUIDE_TOP = """K8 마이 드라이브 자동 전환 {ver}
+GUIDE_TOP = """마이 드라이브 자동 자동 전환 {ver}
 
 마이 드라이브(커스텀) 모드로 달릴 때 서스펜션·핸들·엔진을 속도, 코너(횡G), 엑셀에 따라
 에코와 스포츠 사이에서 자동으로 바꿉니다. 순정 설정 화면이 쓰는 호출만 사용합니다.
@@ -46,14 +46,16 @@ GUIDE_TOP = """K8 마이 드라이브 자동 전환 {ver}
 휴대폰 앱(선택): 1_휴대폰앱 폴더. 차와 블루투스로 연결해 상태를 보고 설정을 바꿉니다.
                 두 방식 모두에서 쓸 수 있습니다.
 
-전제: ECS(전자제어 서스펜션)가 달린 K8(GL3), Gen5W 헤드유닛.
+전제: Gen5W 헤드유닛에 NEMESIS나 서개모가 설치돼 있고, 마이 드라이브(커스텀) 모드가 있는 현대·기아·제네시스 차. 실차 확인은 K8(GL3) 하이브리드만 했습니다.
+     다른 차는 차가 돌려주는 값을 처음 바꿀 때 스스로 배웁니다. 차에 없는 항목(예: 전자제어 서스펜션)은
+     응답이 없어 그 항목만 멈추니, 앱에서 그 항목의 자동 전환을 꺼 두세요. 가솔린 차는 엔진 탭에서 "노멀 ↔ 스포츠"를 켭니다.
 주의: 차가 명령을 따르지 않으면 그 항목은 스스로 멈춥니다. 사용 책임은 운전자에게 있습니다.
      설치와 헤드유닛 재시작은 반드시 주차 상태에서 하세요.
 
 버전: 엔진 {ver} / 서개모 설정 카드 {card} / 휴대폰 앱 {phone} / 헤드유닛 앱 포함(NEMESIS)
 """
 
-GUIDE_PHONE = """K8 마이 드라이브 휴대폰 앱 {phone}
+GUIDE_PHONE = """마이 드라이브 자동 휴대폰 앱 {phone}
 
 설치
 1. {apk} 파일을 휴대폰으로 옮겨 엽니다. "출처를 알 수 없는 앱" 설치를 허용해야 할 수 있습니다.
@@ -70,14 +72,14 @@ GUIDE_PHONE = """K8 마이 드라이브 휴대폰 앱 {phone}
 이전 버전이 설치돼 있으면 그대로 덮어 설치됩니다(같은 서명).
 """
 
-GUIDE_NEMESIS = """K8 마이 드라이브 {ver} - NEMESIS용 USB 설치
+GUIDE_NEMESIS = """마이 드라이브 자동 {ver} - NEMESIS용 USB 설치
 
 처음 설치
 1. {zip} 압축을 풀고, 나온 NEMESIS.data 파일과 packages 폴더를 USB 최상위에 그대로 넣습니다.
    (USB에 원래 있던 NEMESIS.data는 덮어쓰게 되니 필요하면 먼저 따로 보관하세요.)
 2. 주차한 뒤 시동을 켜고, 내비 화면이 뜨면 USB를 꽂습니다.
 3. 설치 확인 창에서 "예"를 누릅니다. 끝나면 USB를 빼도 됩니다.
-4. 헤드유닛 "K8 마이 드라이브" 앱(NEMESIS Manager > 내 패키지)에서 "자동 전환"을 켜고 저장합니다.
+4. 헤드유닛 "마이 드라이브 자동" 앱(NEMESIS Manager > 내 패키지)에서 "자동 전환"을 켜고 저장합니다.
 
 업데이트(이미 설치된 차)
 - USB의 NEMESIS.data 파일을 메모장으로 열어 type=install 을 type=update 로 바꾼 뒤 같은 방법으로 꽂습니다.
@@ -88,11 +90,11 @@ GUIDE_NEMESIS = """K8 마이 드라이브 {ver} - NEMESIS용 USB 설치
 모든 전환은 마이 드라이브 모드에서만 동작합니다. 드라이브 모드 버튼으로 마이 드라이브를 고르세요.
 """
 
-GUIDE_SEOGAEMO = """K8 마이 드라이브 {ver} - 서개모(HMG-Seogaemo)용
+GUIDE_SEOGAEMO = """마이 드라이브 자동 {ver} - 서개모(HMG-Seogaemo)용
 
 NEMESIS 패키지는 필요 없습니다. 모듈 두 개를 설치하고 둘 다 켭니다.
-  - K8 마이 드라이브 엔진 (k8-mydrive-engine-{ver}.hsm) : 실제로 전환하는 엔진
-  - K8 마이 드라이브      (k8-mydrive-{card}.hsm)       : 설정 카드
+  - 마이 드라이브 자동 엔진 (k8-mydrive-engine-{ver}.hsm) : 실제로 전환하는 엔진
+  - 마이 드라이브 자동      (k8-mydrive-{card}.hsm)       : 설정 카드
 
 설치
 1. {zip} 압축을 풀고, 나온 HSM 폴더를 USB 최상위에 그대로 넣습니다.
@@ -177,9 +179,9 @@ def build(out_dir, engine_from=None):
         raise SystemExit("engine module %s differs from NEMESIS package %s" % (engine_ver, ver))
     fmt = dict(ver=ver, card=card_ver, phone=phone)
     pkg_name = build_nemesis.PACKAGE_ID + "-" + ver + ".zip"
-    apk_name = "K8-마이드라이브-폰-" + phone + ".apk"
-    nem_zip = "K8-마이드라이브-NEMESIS-USB-" + ver + ".zip"
-    sg_zip = "K8-마이드라이브-서개모-USB-" + ver + ".zip"
+    apk_name = "마이드라이브자동-폰-" + phone + ".apk"
+    nem_zip = "마이드라이브자동-NEMESIS-USB-" + ver + ".zip"
+    sg_zip = "마이드라이브자동-서개모-USB-" + ver + ".zip"
 
     nemesis_usb = make_zip([
         ("NEMESIS.data", ("[nemesis]\nversion=1.0\ntype=install\npath=packages/" + pkg_name + "\n").encode()),
@@ -202,7 +204,7 @@ def build(out_dir, engine_from=None):
     for name, data in files.items():
         scan(name, data)
 
-    folder_name = "K8-마이드라이브-" + ver
+    folder_name = "마이드라이브자동-" + ver
     out = Path(out_dir)
     folder = out / folder_name
     if folder.exists():

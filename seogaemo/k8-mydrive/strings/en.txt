@@ -1,4 +1,4 @@
-name=K8 My Drive
+name=My Drive Auto
 summary=Switches My Drive suspension, steering and powertrain by speed, corners and accelerator.
 tab=Tab
 choice_tab_susp=Suspension
@@ -29,4 +29,4 @@ e_str=[Engine] sport also sets steering sport
 mx=Max switches per minute (each item)
 cf=Settings
 save_log=Save log to USB
-need_engine=The engine is not running. Turn on the "K8 My Drive engine" module and restart the head unit once
+need_engine=The engine is not running. Turn on the "My Drive Auto engine" module and restart the head unit once

@@ -12,7 +12,7 @@
 ## 로그 받기 (읽기 전용)
 
 ```bash
-ADB=C:/Users/dlatn/.local/share/android-sdk/platform-tools/adb.exe
+ADB=<Android SDK>/platform-tools/adb.exe
 "$ADB" connect <주소>:5555
 "$ADB" -s <주소>:5555 logcat -v time > private/captures/ecs-capture.txt
 ```

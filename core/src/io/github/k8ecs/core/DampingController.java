@@ -7,6 +7,11 @@ package io.github.k8ecs.core;
 public final class DampingController {
     /** Returned by {@link #update} when nothing should be sent. */
     public static final int NO_COMMAND = -1;
+    /**
+     * Below this speed lateral G does not count as a corner: parking turns and kerbs gave 0.25 g at 5 km/h
+     * and left the car in sport after stopping (2026-11-16).
+     */
+    public static final int CORNER_MIN_KMH = 15;
 
     private final DampingRules rules;
     private int speedLevel;
@@ -24,7 +29,7 @@ public final class DampingController {
 
     public DampingController(DampingRules rules) {
         this.rules = rules;
-        this.recentCommands = new long[rules.maxSwitchesPerMinute];
+        this.recentCommands = new long[Math.max(1, rules.maxSwitchesPerMinute)];
         java.util.Arrays.fill(recentCommands, Long.MIN_VALUE);
     }
 
@@ -72,18 +77,23 @@ public final class DampingController {
      */
     public int update(long nowMs, int kmh, boolean customModeActive, boolean moving, boolean linkedHigh, boolean useOwn) {
         trackSpeed(kmh);
-        trackCorner(nowMs);
+        trackCorner(nowMs, kmh);
         int own = speedLevel;
         if (cornerActive && rules.cornerLevel > own) own = rules.cornerLevel;
         ownLevel = useOwn ? own : 0;
-        if (halted || !customModeActive || !moving) return NO_COMMAND;
+        if (halted || !customModeActive) return NO_COMMAND;
 
         int target = ownLevel;
         if (linkedHigh) target = rules.levelCount - 1;
+        if (!moving) {
+            // Stopped or reversing: never raise, but bring a raised item back to the bottom step.
+            if (commandedLevel <= 0) return NO_COMMAND;
+            target = 0;
+        }
         if (target == commandedLevel) return NO_COMMAND;
         if (lastCommandMs != Long.MIN_VALUE && nowMs - lastCommandMs < rules.minDwellMs) return NO_COMMAND;
         long oldest = recentCommands[recentIndex];
-        if (oldest != Long.MIN_VALUE && nowMs - oldest < 60000L) return NO_COMMAND;
+        if (rules.maxSwitchesPerMinute > 0 && oldest != Long.MIN_VALUE && nowMs - oldest < 60000L) return NO_COMMAND;
 
         recentCommands[recentIndex] = nowMs;
         recentIndex = (recentIndex + 1) % recentCommands.length;
@@ -98,7 +108,7 @@ public final class DampingController {
         while (speedLevel > 0 && kmh < up[speedLevel - 1] - rules.speedHysteresisKmh) speedLevel--;
     }
 
-    private void trackCorner(long nowMs) {
+    private void trackCorner(long nowMs, int kmh) {
         if (rules.cornerOnMilliG == 0) {
             cornerActive = false;
             return;
@@ -106,7 +116,7 @@ public final class DampingController {
         boolean fresh = lateralAtMs != Long.MIN_VALUE && nowMs - lateralAtMs <= rules.lateralStaleMs;
         // Without fresh samples treat the car as going straight: the corner rule fades out
         // through the normal release delay instead of latching.
-        int g = fresh ? lateralMilliG : 0;
+        int g = fresh && kmh >= CORNER_MIN_KMH ? lateralMilliG : 0;
         if (g >= rules.cornerOnMilliG) {
             cornerBelowSinceMs = -1;
             if (cornerAboveSinceMs < 0) cornerAboveSinceMs = nowMs;

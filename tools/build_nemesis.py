@@ -18,8 +18,8 @@ APK = ROOT / "private" / "hu" / "k8-ecs-hu.apk"
 OUT = ROOT / "private" / "nemesis"
 
 PACKAGE_ID = "k8ecs.damping"
-PACKAGE_VERSION = "0.3.6"
-SHORT_DESC = "K8 My Drive: auto Eco/Sport for suspension, steering, engine"
+PACKAGE_VERSION = "0.4.2"
+SHORT_DESC = "My Drive Auto: Eco/Sport for suspension, steering, engine"
 DETAILED_DESC = ("Switches the My Drive suspension, steering and engine items between Eco and Sport by speed, "
                  "lateral G and accelerator. Works only in My Drive mode, off until enabled in its app. "
                  "Uses only the stock settings call. Use at your own risk.")
@@ -33,7 +33,7 @@ def descriptor():
         "[nemesis]",
         "version=1.1",
         "id=" + PACKAGE_ID,
-        "name=K8 My Drive",
+        "name=My Drive Auto",
         "type=application,service",
         "package-version=" + PACKAGE_VERSION,
         'short-desc="' + SHORT_DESC + '"',

@@ -11,7 +11,8 @@ import java.util.Map;
  * <ul>
  * <li>suspension (item 1): speed and lateral G rules ({@code speedUp hyst cornerOn cornerOff dwell})</li>
  * <li>steering (item 2): its own speed and lateral G rules ({@code steer*})</li>
- * <li>powertrain (item 0): accelerator pedal rule ({@code engPedal engHold})</li>
+ * <li>powertrain (item 0): accelerator pedal rule ({@code engPedal engHold}); low step is Eco (hybrid, value 2)
+ *     or Normal ({@code engNormal=1}, value 0, for cars whose powertrain item has Normal/Sport)</li>
  * </ul>
  * {@code enabled} is the master switch; each item has its own on flag. All work only in My Drive.
  */
@@ -35,7 +36,8 @@ public final class Settings {
 
     public final boolean engOn;
     public final int engPedalPct;     // pedal at or above this -> sport
-    public final int engHoldMs;       // pedal below it this long -> eco
+    public final int engHoldMs;       // pedal below it this long -> low step
+    public final boolean engNormal;   // low step is Normal (value 0) instead of Eco (value 2)
 
     // Links: when one item's own rule goes sport, also put the other item to sport.
     public final boolean engLinkSusp, engLinkSteer, suspLinkEng, suspLinkSteer;
@@ -50,7 +52,8 @@ public final class Settings {
         dwellMs = num(m, "dwell");
         maxPerMinute = num(m, "maxPerMin");
         gyroScale = dbl(m, "gyroScale");
-        steerOn = flag(m, "steerOn");
+        // Suspension and steering auto are one or the other (user, 2026-11-16); links still drive the other.
+        steerOn = flag(m, "steerOn") && !suspOn;
         steerSpeedUpKmh = num(m, "steerSpeedUp");
         steerHysteresisKmh = num(m, "steerHyst");
         steerCornerOnMilliG = num(m, "steerCornerOn");
@@ -59,6 +62,7 @@ public final class Settings {
         engOn = flag(m, "engOn");
         engPedalPct = num(m, "engPedal");
         engHoldMs = num(m, "engHold");
+        engNormal = flag(m, "engNormal");
         engLinkSusp = flag(m, "engLinkSusp");
         engLinkSteer = flag(m, "engLinkSteer");
         suspLinkEng = flag(m, "suspLinkEng");
@@ -98,6 +102,7 @@ public final class Settings {
         m.put("engOn", "0");
         m.put("engPedal", "60");
         m.put("engHold", "5000");
+        m.put("engNormal", "0");
         m.put("engLinkSusp", "0");
         m.put("engLinkSteer", "0");
         m.put("suspLinkEng", "0");
@@ -150,6 +155,7 @@ public final class Settings {
         m.put("engOn", engOn ? "1" : "0");
         m.put("engPedal", Integer.toString(engPedalPct));
         m.put("engHold", Integer.toString(engHoldMs));
+        m.put("engNormal", engNormal ? "1" : "0");
         m.put("engLinkSusp", engLinkSusp ? "1" : "0");
         m.put("engLinkSteer", engLinkSteer ? "1" : "0");
         m.put("suspLinkEng", suspLinkEng ? "1" : "0");

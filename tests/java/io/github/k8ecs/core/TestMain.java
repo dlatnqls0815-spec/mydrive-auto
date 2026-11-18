@@ -16,6 +16,9 @@ public final class TestMain {
     public static void main(String[] args) {
         speedHysteresis();
         gating();
+        stoppedReturnsDown();
+        unlimitedRate();
+        suspSteerExclusive();
         corner();
         cornerLinkLoss();
         rateLimit();
@@ -119,9 +122,16 @@ public final class TestMain {
         check(badMargin, "margin larger than the speed is rejected");
         check(Settings.parse("allModes=1", d).encode().equals(d.encode()), "removed allModes key from 0.1.7 configs is ignored");
         check(d.suspOn && !d.steerOn && !d.engOn, "suspension on, steering and engine off by default");
-        Settings t = Settings.parse("steerOn=1 steerSpeedUp=60 steerHyst=10 engOn=1 engPedal=70 engHold=4000", d);
+        Settings t = Settings.parse("suspOn=0 steerOn=1 steerSpeedUp=60 steerHyst=10 engOn=1 engPedal=70 engHold=4000", d);
         check(t.steerOn && t.steerRules().speedUpKmh[0] == 60 && t.engOn && t.engPedalPct == 70 && t.engHoldMs == 4000, "item settings");
         check(Settings.parse(t.encode(), d).encode().equals(t.encode()), "item settings round trip");
+        check(!d.engNormal, "engine low step is Eco by default (hybrid)");
+        Settings gas = Settings.parse("engNormal=1", d);
+        check(gas.engNormal && Settings.parse(gas.encode(), d).engNormal, "engine Normal choice round trip");
+        check(Settings.parse("engOn=1", d).encode().contains("engNormal=0"), "config without engNormal (0.4.0) reads as Eco");
+        boolean badNormal = false;
+        try { Settings.parse("engNormal=2", d); } catch (IllegalArgumentException e) { badNormal = true; }
+        check(badNormal, "engNormal must be 0 or 1");
         boolean badPedal = false;
         try { Settings.parse("engPedal=2", d); } catch (IllegalArgumentException e) { badPedal = true; }
         check(badPedal, "pedal threshold below 5% rejected");
@@ -174,6 +184,56 @@ public final class TestMain {
         check(c.update(2000, 120, true, true) == 1, "sends once allowed");
         c.halt();
         check(c.update(60000, 20, true, true) == DampingController.NO_COMMAND && c.isHalted(), "halt is final");
+    }
+
+    private static void suspSteerExclusive() {
+        Settings both = Settings.parse("suspOn=1 steerOn=1", Settings.defaults());
+        check(both.suspOn && !both.steerOn, "suspension and steering auto are exclusive, suspension wins");
+        Settings steer = Settings.parse("suspOn=0 steerOn=1", Settings.defaults());
+        check(!steer.suspOn && steer.steerOn, "steering alone stays on");
+    }
+
+    private static void unlimitedRate() {
+        DampingController c = new DampingController(
+                new DampingRules(2, new int[] {100}, 15, 250, 120, 1, 300, 2500, 1000, 0, 1000));
+        c.onCarLevel(0);
+        int sent = 0;
+        for (int i = 0; i < 30; i++) {
+            if (c.update(i * 1000L, i % 2 == 0 ? 120 : 50, true, true) != DampingController.NO_COMMAND) sent++;
+        }
+        check(sent == 30, "maxPerMin 0: only the dwell limits (" + sent + ")");
+        PedalController p = new PedalController(60, 500, 0);
+        p.onCarLevel(0);
+        int ps = 0;
+        for (int i = 0; i < 30; i++) {
+            if (p.update(i * 1000L, i % 2 == 0 ? 90 : 0, i * 1000L, true, true) != PedalController.NO_COMMAND) ps++;
+        }
+        check(ps == 30, "pedal maxPerMin 0: only the 1 s gap limits (" + ps + ")");
+    }
+
+    private static void stoppedReturnsDown() {
+        // Corner at parking speed is ignored.
+        DampingController c = new DampingController(rules());
+        c.onCarLevel(0);
+        c.onLateral(0, 300);
+        c.update(0, 5, true, true);
+        c.onLateral(400, 300);
+        check(c.update(400, 5, true, true) == DampingController.NO_COMMAND, "no corner below 15 km/h");
+        // Raised while driving, then stopped: goes back down after the dwell, never up while stopped.
+        DampingController d = new DampingController(rules());
+        d.onCarLevel(0);
+        check(d.update(0, 120, true, true) == 1, "speed raises");
+        check(d.update(1000, 0, true, false) == DampingController.NO_COMMAND, "dwell still applies when stopped");
+        check(d.update(4000, 0, true, false) == 0, "stopped: back to the bottom step");
+        check(d.update(9000, 0, true, false) == DampingController.NO_COMMAND, "stopped and already down: nothing");
+        DampingController e = new DampingController(rules());
+        e.onCarLevel(0);
+        check(e.update(0, 0, true, false, true, true) == DampingController.NO_COMMAND, "link never raises while stopped");
+        PedalController p = new PedalController(60, 1000, 8);
+        p.onCarLevel(0);
+        check(p.update(0, 90, 0, true, true) == 1, "pedal sport while moving");
+        check(p.update(4000, 90, 4000, true, false) == 0, "stopped with pedal down: back to eco");
+        check(p.update(9000, 90, 9000, true, false) == PedalController.NO_COMMAND, "stopped: stays eco");
     }
 
     private static void corner() {

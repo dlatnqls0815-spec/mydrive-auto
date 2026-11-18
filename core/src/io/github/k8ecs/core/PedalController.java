@@ -17,14 +17,16 @@ public final class PedalController {
     private int recentIndex;
     private long lastAboveMs = Long.MIN_VALUE;
     private int commandedLevel = NO_COMMAND;
+    private final boolean capped;
     private long lastCommandMs = Long.MIN_VALUE;
     private boolean halted;
 
     public PedalController(int onPct, long holdMs, int maxPerMinute) {
-        if (onPct < 1 || onPct > 100 || holdMs < 0 || maxPerMinute < 1) throw new IllegalArgumentException("pedal rule");
+        if (onPct < 1 || onPct > 100 || holdMs < 0 || maxPerMinute < 0) throw new IllegalArgumentException("pedal rule");
+        this.capped = maxPerMinute > 0;  // 0 = no per-minute cap (the 1 s gap still applies)
         this.onPct = onPct;
         this.holdMs = holdMs;
-        this.recentCommands = new long[maxPerMinute];
+        this.recentCommands = new long[Math.max(1, maxPerMinute)];
         java.util.Arrays.fill(recentCommands, Long.MIN_VALUE);
     }
 
@@ -53,13 +55,18 @@ public final class PedalController {
                       boolean linkedSport, boolean useOwn) {
         boolean fresh = pedalAtMs != Long.MIN_VALUE && nowMs - pedalAtMs <= STALE_MS;
         if (fresh && pedalPct >= onPct) lastAboveMs = nowMs;
-        if (halted || !active || !moving) return NO_COMMAND;
+        if (halted || !active) return NO_COMMAND;
 
         int target = (useOwn && isSportWanted(nowMs)) || linkedSport ? 1 : 0;
+        if (!moving) {
+            // Stopped or reversing: never raise, but bring sport back to eco.
+            if (commandedLevel <= 0) return NO_COMMAND;
+            target = 0;
+        }
         if (target == commandedLevel) return NO_COMMAND;
         if (lastCommandMs != Long.MIN_VALUE && nowMs - lastCommandMs < MIN_GAP_MS) return NO_COMMAND;
         long oldest = recentCommands[recentIndex];
-        if (oldest != Long.MIN_VALUE && nowMs - oldest < 60000L) return NO_COMMAND;
+        if (capped && oldest != Long.MIN_VALUE && nowMs - oldest < 60000L) return NO_COMMAND;
 
         recentCommands[recentIndex] = nowMs;
         recentIndex = (recentIndex + 1) % recentCommands.length;

@@ -341,7 +341,7 @@ final class SeogaemoBridge {
         String steer = st.get("steer");
         out.put("steer", "normal".equals(steer) ? "NORMAL" : "sport".equals(steer) ? "SPORT" : "unknown");
         String eng = st.get("eng");
-        out.put("eng", "eco".equals(eng) ? "ECO" : "sport".equals(eng) ? "SPORT" : "unknown");
+        out.put("eng", "eco".equals(eng) ? "ECO" : "normal".equals(eng) ? "NORMAL" : "sport".equals(eng) ? "SPORT" : "unknown");
         String pedal = st.get("pedal");
         out.put("pedal", "?".equals(pedal) || pedal == null ? "unavailable" : pedal);  // Seogaemo shows % as ?
         out.put("steersent", String.valueOf(st.get("steerSent")));

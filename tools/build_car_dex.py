@@ -17,7 +17,8 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_JAR = ROOT.parent / "k8-ambient-sync" / ".tools" / "android19" / "android-4.4.2" / "android.jar"
-DEFAULT_D8 = Path("C:/Users/dlatn/.local/share/android-sdk/build-tools/35.0.1/lib/d8.jar")
+SDK = Path(os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT") or Path.home() / ".local/share/android-sdk")
+DEFAULT_D8 = SDK / "build-tools" / "35.0.1" / "lib" / "d8.jar"
 TARGETS = {
     "probe": ([ROOT / "probe" / "src", ROOT / "core" / "src"], ROOT / "private" / "probe" / "k8-ecs-probe.dex",
               b"Lio/github/k8ecs/probe/GpsTap;"),
