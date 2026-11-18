@@ -37,6 +37,8 @@ public final class Settings {
     public final boolean engOn;
     public final int engPedalPct;     // pedal at or above this -> sport
     public final int engHoldMs;       // pedal below it this long -> low step
+    /** Drive mode the module works in: 0 My Drive, 1 Eco, 2 Normal (CarLog.RUN_*; Eco/Normal are a test option). */
+    public final int runMode;
     public final boolean engNormal;   // low step is Normal (value 0) instead of Eco (value 2)
 
     // Links: when one item's own rule goes sport, also put the other item to sport.
@@ -63,6 +65,7 @@ public final class Settings {
         engPedalPct = num(m, "engPedal");
         engHoldMs = num(m, "engHold");
         engNormal = flag(m, "engNormal");
+        runMode = num(m, "runMode");
         engLinkSusp = flag(m, "engLinkSusp");
         engLinkSteer = flag(m, "engLinkSteer");
         suspLinkEng = flag(m, "suspLinkEng");
@@ -72,6 +75,7 @@ public final class Settings {
         speedRule("steerSpeedUp", steerSpeedUpKmh, steerHysteresisKmh, "steerHyst");
         if (Double.isNaN(gyroScale) || Math.abs(gyroScale) > 10) throw new IllegalArgumentException("gyroScale");
         if (engPedalPct < 5 || engPedalPct > 100) throw new IllegalArgumentException("engPedal 5..100");
+        if (runMode < 0 || runMode > 2) throw new IllegalArgumentException("runMode 0..2");
         if (engHoldMs < 1000 || engHoldMs > 60000) throw new IllegalArgumentException("engHold 1..60 s");
         toRules(); // validates the rest
         steerRules();
@@ -103,6 +107,7 @@ public final class Settings {
         m.put("engPedal", "60");
         m.put("engHold", "5000");
         m.put("engNormal", "0");
+        m.put("runMode", "0");
         m.put("engLinkSusp", "0");
         m.put("engLinkSteer", "0");
         m.put("suspLinkEng", "0");
@@ -156,6 +161,7 @@ public final class Settings {
         m.put("engPedal", Integer.toString(engPedalPct));
         m.put("engHold", Integer.toString(engHoldMs));
         m.put("engNormal", engNormal ? "1" : "0");
+        m.put("runMode", Integer.toString(runMode));
         m.put("engLinkSusp", engLinkSusp ? "1" : "0");
         m.put("engLinkSteer", engLinkSteer ? "1" : "0");
         m.put("suspLinkEng", suspLinkEng ? "1" : "0");

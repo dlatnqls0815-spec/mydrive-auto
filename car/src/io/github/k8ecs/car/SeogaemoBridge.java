@@ -362,7 +362,7 @@ final class SeogaemoBridge {
         StringBuilder state = new StringBuilder();
         if (!enabled) state.append("OFF");
         else {
-            state.append("1".equals(st.get("custom")) ? "ON S:" : "WAIT (not My Drive) S:").append(onOff(st.get("suspOn"), halted.contains("S")))
+            state.append("1".equals(st.get(st.containsKey("active") ? "active" : "custom")) ? "ON S:" : "WAIT (drive mode) S:").append(onOff(st.get("suspOn"), halted.contains("S")))
                     .append(" H:").append(onOff(st.get("steerOn"), halted.contains("H")))
                     .append(" E:").append(onOff(st.get("engOn"), halted.contains("E")));
         }

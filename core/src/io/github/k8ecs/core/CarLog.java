@@ -89,6 +89,21 @@ public final class CarLog {
         return mode == MODE_ECO || mode == MODE_SPORT || mode == MODE_SMART;
     }
 
+    /** Settings.runMode: the drive mode the module works in. */
+    public static final int RUN_MY_DRIVE = 0, RUN_ECO = 1, RUN_NORMAL = 2;
+
+    /**
+     * Whether the module works in the current drive mode. My Drive as before; Eco = mode 0x02; Normal = any mode
+     * byte that is not eco, sport or smart (gasoline Normal/Comfort, byte not seen on the K8 hybrid). In Eco and
+     * Normal the car may store the item values without acting on them: a test option until a car shows it works.
+     */
+    public static boolean isRunMode(int run, int mode, int slot) {
+        if (mode < 0) return false;
+        if (run == RUN_ECO) return mode == MODE_ECO;
+        if (run == RUN_NORMAL) return !isStockMode(mode);
+        return isMyDrive(mode, slot);
+    }
+
     private static final String MY_DRIVE_SLOT = "requestNewMyDriveMode] data:";
     /** Fourth drive mode slot chosen in the stock screen: My Drive (custom items) or Smart. */
     public static final int SLOT_MY_DRIVE = 1, SLOT_SMART = 2;
