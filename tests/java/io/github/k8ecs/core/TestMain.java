@@ -125,6 +125,16 @@ public final class TestMain {
         Settings t = Settings.parse("suspOn=0 steerOn=1 steerSpeedUp=60 steerHyst=10 engOn=1 engPedal=70 engHold=4000", d);
         check(t.steerOn && t.steerRules().speedUpKmh[0] == 60 && t.engOn && t.engPedalPct == 70 && t.engHoldMs == 4000, "item settings");
         check(Settings.parse(t.encode(), d).encode().equals(t.encode()), "item settings round trip");
+        check(VehicleProfile.forProduct("GL3_KOR") == VehicleProfile.K8_GL3, "K8 product matches the K8 profile");
+        check(VehicleProfile.forProduct("XYZ123") == VehicleProfile.GENERIC, "unknown product falls back to generic");
+        check(VehicleProfile.forProduct(null) == VehicleProfile.GENERIC, "missing product falls back to generic");
+        for (VehicleProfile v : VehicleProfile.ALL) {
+            for (VehicleProfile.Item it : new VehicleProfile.Item[] {v.suspension, v.steering, v.engineEco, v.engineNormal}) {
+                check(!it.supported || it.lowValue != it.sportValue, v.id + ": low and sport send different values");
+                check(!it.supported || it.lowFeedback != it.sportFeedback, v.id + ": low and sport feedback differ");
+            }
+        }
+        check(VehicleProfile.ALL[VehicleProfile.ALL.length - 1] == VehicleProfile.GENERIC, "generic profile is last");
         check(!d.engNormal, "engine low step is Eco by default (hybrid)");
         Settings gas = Settings.parse("engNormal=1", d);
         check(gas.engNormal && Settings.parse(gas.encode(), d).engNormal, "engine Normal choice round trip");

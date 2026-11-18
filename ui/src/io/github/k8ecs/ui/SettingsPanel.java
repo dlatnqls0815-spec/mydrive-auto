@@ -930,7 +930,8 @@ public final class SettingsPanel {
                 .replace("corner ", "코너 ").replace("pedal ", "엑셀 ").replace("link ", "연동 ")
                 .replace("stopped", "정차");
         footer.setText("전환 " + m.get("sent") + "회" + ("-".equals(last) || "null".equals(last) ? "" : " · 마지막 " + last)
-                + " · 센서 보정 " + calib + ("ok".equals(m.get("imu")) ? "" : " · 센서 " + m.get("imu")));
+                + " · 센서 보정 " + calib + ("ok".equals(m.get("imu")) ? "" : " · 센서 " + m.get("imu"))
+                + (m.get("profile") != null ? " · 차종 프로필 " + m.get("profile") : ""));
     }
 
     /** The pill under the speed (driving state) and one line saying why. */

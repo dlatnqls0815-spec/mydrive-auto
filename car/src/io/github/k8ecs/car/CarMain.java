@@ -15,6 +15,7 @@ import io.github.k8ecs.core.GyroCalibrator;
 import io.github.k8ecs.core.PedalController;
 import io.github.k8ecs.core.HippoStream;
 import io.github.k8ecs.core.Settings;
+import io.github.k8ecs.core.VehicleProfile;
 
 import java.io.BufferedReader;
 import java.io.File;
@@ -45,7 +46,7 @@ import java.util.UUID;
  * moving forward. Settings over 127.0.0.1 TCP (head unit app) and Bluetooth RFCOMM (phone).
  */
 public final class CarMain {
-    static final String VERSION = "0.4.2";
+    static final String VERSION = "0.4.3";
     /** BCM getSpeed_KMHUnit() returns the display speed raw value in 0.5 km/h steps (65 = 32.5 km/h on the cluster). */
     static final float BCM_SPEED_RAW_PER_KMH = 2f;
     static final String LOG_DIR = "/data/nemesis/logs/k8ecs.damping";
@@ -65,9 +66,12 @@ public final class CarMain {
     private DampingController controller;       // suspension
     private DampingController steerController;  // steering
     private PedalController pedalController;    // powertrain
-    private final Channel susp = new Channel("suspension", CarLog.SUSPENSION_ITEM, 0, 1, 2, 5, "soft", "firm");
-    private final Channel steer = new Channel("steering", CarLog.STEERING_ITEM, 0, 1, 2, 5, "normal", "sport");
-    private final Channel eng = new Channel("powertrain", CarLog.POWERTRAIN_ITEM, 2, 1, 4, 5, "eco", "sport");
+    /** Car model profile from ro.build.product (core/VehicleProfile; add new cars there). */
+    private final String product = systemProp("ro.build.product");
+    private final VehicleProfile profile = VehicleProfile.forProduct(product);
+    private final Channel susp = new Channel("suspension", profile.suspension);
+    private final Channel steer = new Channel("steering", profile.steering);
+    private final Channel eng = new Channel("powertrain", profile.engineEco);
     private double pedalPct;
     private long pedalAtMs = Long.MIN_VALUE;
     private String pedalState = "starting";
@@ -123,6 +127,7 @@ public final class CarMain {
         m.seogaemo = sg;
         start("seogaemo", new Runnable() { public void run() { sg.run(); } });
         Log.i("started " + VERSION + (inHost ? " (seogaemo host)" : "") + " " + m.settings.encode());
+        Log.i("vehicle profile " + m.profile.id + " (ro.build.product=" + m.product + ")");
         return m;
     }
 
@@ -260,7 +265,7 @@ public final class CarMain {
         controller = new DampingController(s.toRules());
         steerController = new DampingController(s.steerRules());
         pedalController = new PedalController(s.engPedalPct, s.engHoldMs, s.maxPerMinute);
-        if (eng.setLow(s.engNormal)) {
+        if (eng.setLow(profile.engine(s.engNormal))) {
             Log.i("powertrain low step " + eng.name0 + " (value " + eng.value0 + ", feedback " + eng.fb0 + ")");
             eng.carStep = -1; // re-read from the next feedback with the new mapping
         }
@@ -287,6 +292,7 @@ public final class CarMain {
     /** The item is driven: its own rule is on, or another item links into it. */
     boolean channelOn(Channel c) {
         Settings s = settings;
+        if (!c.supported) return false; // the car profile says this model has no such item
         return s.enabled && (c == susp ? s.suspOn || s.engLinkSusp
                 : c == steer ? s.steerOn || s.engLinkSteer || s.suspLinkSteer
                 : s.engOn || s.suspLinkEng);
@@ -637,7 +643,7 @@ public final class CarMain {
                 + " frames=" + imuFrames + " gyroScale=" + scale + " turns=" + gyro.segmentCount()
                 + " bias=" + (Double.isNaN(gyro.bias()) ? "?" : String.format(Locale.US, "%.1f", gyro.bias()))
                 + " latcal=" + (!accel.ready() ? "wait" : accel.oriented() ? "ok" : "est" + accel.progress())
-                + " cfg=" + cfgId(settings.encode()) + " ver=" + VERSION;
+                + " cfg=" + cfgId(settings.encode()) + " profile=" + profile.id + " ver=" + VERSION;
     }
 
     /** Settings fingerprint in status, so the apps notice changes made elsewhere (phone, head unit, card). */
@@ -816,6 +822,15 @@ public final class CarMain {
         }
     }
 
+    static String systemProp(String key) {
+        try {
+            Class<?> sp = Class.forName("android.os.SystemProperties");
+            return (String) sp.getMethod("get", String.class, String.class).invoke(null, key, "");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
     static void sleep(long ms) {
         try { Thread.sleep(ms); } catch (InterruptedException ignored) { }
     }
@@ -906,19 +921,22 @@ public final class CarMain {
         String lastReason = "-";
         boolean halted;
 
-        Channel(String name, int item, int value0, int value1, int fb0, int fb1, String name0, String name1) {
-            this.name = name; this.item = item; this.value0 = value0; this.value1 = value1;
-            this.fb0 = fb0; this.fb1 = fb1; this.name0 = name0; this.name1 = name1;
+        final boolean supported;
+
+        Channel(String name, VehicleProfile.Item p) {
+            this.name = name; this.item = p.item; this.supported = p.supported;
+            this.value0 = p.lowValue; this.value1 = p.sportValue;
+            this.fb0 = p.lowFeedback; this.fb1 = p.sportFeedback;
+            this.name0 = p.lowName; this.name1 = p.sportName;
         }
 
         /**
          * Powertrain low step: Eco (value 2, feedback 4, confirmed on the hybrid K8) or Normal (value 0;
          * feedback 2 as on the steering and suspension items, not yet seen on a powertrain). Returns true if changed.
          */
-        boolean setLow(boolean normal) {
-            int v = normal ? 0 : 2, f = normal ? 2 : 4;
-            if (v == value0 && f == fb0) return false;
-            value0 = v; fb0 = f; name0 = normal ? "normal" : "eco";
+        boolean setLow(VehicleProfile.Item p) {
+            if (p.lowValue == value0 && p.lowFeedback == fb0) return false;
+            value0 = p.lowValue; fb0 = p.lowFeedback; name0 = p.lowName;
             return true;
         }
 

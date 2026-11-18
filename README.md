@@ -27,6 +27,17 @@
 
 자세한 설치·설정: [docs/INSTALL.md](docs/INSTALL.md)
 
+## 내 차 추가하기
+
+다른 차를 쓰신다면 [CONTRIBUTING.md](CONTRIBUTING.md)를 보고 차종 프로필
+([`VehicleProfile.java`](core/src/io/github/k8ecs/core/VehicleProfile.java))을 추가하거나,
+[새 차 보고](../../issues/new?template=new-car.md) 이슈로 값을 알려 주세요.
+
+| 차종 프로필 | `ro.build.product` | 상태 |
+|---|---|---|
+| `k8-gl3` | `GL3*` | 기아 K8 하이브리드, 실차 확인 |
+| `generic` | 그 외 | K8 번호로 시작, 응답 값은 차에서 배움 |
+
 ## 구조
 
 - `core/` 전환 규칙(속도·코너·엑셀), 설정, 로그 해석. PC에서 단위 시험.
