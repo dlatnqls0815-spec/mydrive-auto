@@ -176,14 +176,6 @@ public final class TestMain {
         check(!CarLog.isMyDrive(6, CarLog.SLOT_SMART), "mode 6 after smart chosen");
         check(!CarLog.isMyDrive(2, CarLog.SLOT_MY_DRIVE) && !CarLog.isMyDrive(3, -1) && !CarLog.isMyDrive(-1, 1), "eco sport unknown");
         check(CarLog.isMyDrive(5, CarLog.SLOT_SMART), "other mode byte counts as custom");
-        check(CarLog.isRunMode(CarLog.RUN_MY_DRIVE, 6, 1) && !CarLog.isRunMode(CarLog.RUN_MY_DRIVE, 2, 1), "run in my drive");
-        check(CarLog.isRunMode(CarLog.RUN_ECO, 2, -1) && !CarLog.isRunMode(CarLog.RUN_ECO, 6, 1) && !CarLog.isRunMode(CarLog.RUN_ECO, 3, -1), "run in eco only");
-        check(CarLog.isRunMode(CarLog.RUN_NORMAL, 1, -1) && !CarLog.isRunMode(CarLog.RUN_NORMAL, 2, -1) && !CarLog.isRunMode(CarLog.RUN_NORMAL, 3, -1), "run in normal");
-        check(!CarLog.isRunMode(CarLog.RUN_ECO, -1, -1), "unknown mode never runs");
-        { Settings d0 = Settings.defaults(); check(d0.runMode == 0, "runMode default my drive");
-          check(Settings.parse(Settings.parse("runMode=1", d0).encode(), d0).runMode == 1, "runMode round trip");
-          boolean bad = false; try { Settings.parse("runMode=3", d0); } catch (IllegalArgumentException e) { bad = true; }
-          check(bad, "runMode 0..2"); }
     }
 
     private static void speedHysteresis() {

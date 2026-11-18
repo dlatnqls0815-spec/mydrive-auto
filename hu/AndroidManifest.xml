@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="io.github.k8ecs.hu"
-    android:versionCode="22"
-    android:versionName="0.4.5">
+    android:versionCode="21"
+    android:versionName="0.4.4">
     <uses-permission android:name="android.permission.INTERNET" />
     <application android:icon="@mipmap/ic_launcher" android:label="마이 드라이브 자동" android:allowBackup="false"
         android:theme="@android:style/Theme.Holo.NoActionBar">

@@ -46,7 +46,7 @@ import java.util.UUID;
  * moving forward. Settings over 127.0.0.1 TCP (head unit app) and Bluetooth RFCOMM (phone).
  */
 public final class CarMain {
-    static final String VERSION = "0.4.4";
+    static final String VERSION = "0.4.3";
     /** BCM getSpeed_KMHUnit() returns the display speed raw value in 0.5 km/h steps (65 = 32.5 km/h on the cluster). */
     static final float BCM_SPEED_RAW_PER_KMH = 2f;
     static final String LOG_DIR = "/data/nemesis/logs/k8ecs.damping";
@@ -563,7 +563,7 @@ public final class CarMain {
                             if (c.mismatches >= 2) haltLocked(c, "no feedback twice");
                         }
                     }
-                    boolean custom = CarLog.isRunMode(settings.runMode, mode, slot);
+                    boolean custom = CarLog.isMyDrive(mode, slot);
                     boolean moving = kmh > 0 && !reverse;
                     // Own rules first (from the previous tick), then the link options.
                     boolean suspWants = settings.suspOn && controller.ownLevel() >= 1;
@@ -626,13 +626,12 @@ public final class CarMain {
 
     String statusLocked() {
         boolean custom = CarLog.isMyDrive(mode, slot);
-        boolean active = CarLog.isRunMode(settings.runMode, mode, slot);
         String scale = Double.isNaN(gyro.scale()) ? "learning" : String.format(Locale.US, "%.5f", gyro.scale());
         int sent = susp.sent + steer.sent + eng.sent;
         String last = susp.lastReason;
         return "enabled=" + (settings.enabled ? 1 : 0) + " kmh=" + kmh + " lat=" + lateralMilliG + " peak=" + peakMilliG
                 + " pedal=" + (pedalState.equals("ok") ? Integer.toString((int) Math.round(pedalPct)) : "?")
-                + " mode=" + (mode < 0 ? "?" : Integer.toHexString(mode)) + " custom=" + (custom ? 1 : 0) + " active=" + (active ? 1 : 0) + " runMode=" + settings.runMode + " slot=" + slot
+                + " mode=" + (mode < 0 ? "?" : Integer.toHexString(mode)) + " custom=" + (custom ? 1 : 0) + " slot=" + slot
                 + " step=" + susp.stepName(susp.carStep) + " corner=" + (controller.isCornerActive() ? 1 : 0)
                 + " steer=" + steer.stepName(steer.carStep) + " eng=" + eng.stepName(eng.carStep)
                 + " suspOn=" + (channelOn(susp) ? 1 : 0) + " steerOn=" + (channelOn(steer) ? 1 : 0) + " engOn=" + (channelOn(eng) ? 1 : 0)

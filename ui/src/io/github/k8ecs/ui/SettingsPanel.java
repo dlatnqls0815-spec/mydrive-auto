@@ -78,10 +78,6 @@ public final class SettingsPanel {
     private MeterRow speedRow, latRow, pedalRow;
     private TextView[] itemState = new TextView[3], itemBadge = new TextView[3];
     private boolean carKnowsEngNormal;
-    /** Drive mode the module works in (Settings.runMode): 0 My Drive, 1 Eco, 2 Normal. */
-    private int runMode;
-    private boolean carKnowsRunMode;
-    private final TextView[] runButtons = new TextView[3];
     private Toggle enabled, suspOn, steerOn, engOn, engNormal, suspLinkEng, suspLinkSteer, engLinkSusp, engLinkSteer;
     private Stepper speedUp, hyst, cornerOn, cornerOff, dwell, maxPerMin;
     private Stepper steerSpeedUp, steerHyst, steerCornerOn, steerCornerOff, steerDwell;
@@ -167,7 +163,6 @@ public final class SettingsPanel {
         engLinkSusp = new Toggle();
         engLinkSteer = new Toggle();
         tabBody(2, toggleRow(engOn, "엔진 자동 전환", "에코·노멀 ↔ 스포츠 (파워트레인)", 16), new View[] {
-                runModeRow(),
                 toggleRow(engNormal, "노멀 ↔ 스포츠 (가솔린 차)", "끄면 에코 ↔ 스포츠 (하이브리드)", 15),
                 stepRow(engPedal, "스포츠로 바꿀 엑셀", "이만큼 밟으면 스포츠, 끝까지 = 100"),
                 stepRow(engHold, "되돌아갈 시간", "덜 밟은 채 이 시간이 지나면 에코·노멀로"),
@@ -199,7 +194,7 @@ public final class SettingsPanel {
             View head = header(title);
             View live = liveBoard();
             LinearLayout master = card();
-            master.addView(toggleRow(enabled, "자동 전환", "고른 드라이브 모드(기본 마이 드라이브)에서만 바꿉니다", 17));
+            master.addView(toggleRow(enabled, "자동 전환", "마이 드라이브 모드로 주행할 때만 바꿉니다", 17));
             View seg = segmented();
             screen = onePane(head, live, master, seg, toolCard, note);
             showTab(0);
@@ -734,7 +729,6 @@ public final class SettingsPanel {
                 + " engHold=" + engHold.value * 1000
                 // Older car modules (0.4.0 and before) reject unknown keys: send it only when they know it or it is on.
                 + (carKnowsEngNormal || engNormal.on ? " engNormal=" + engNormal.bit() : "")
-                + (carKnowsRunMode || runMode != 0 ? " runMode=" + runMode : "")
                 + " suspLinkEng=" + suspLinkEng.bit() + " suspLinkSteer=" + suspLinkSteer.bit()
                 + " engLinkSusp=" + engLinkSusp.bit() + " engLinkSteer=" + engLinkSteer.bit();
         saveButton.setText("저장 중…");
@@ -814,7 +808,6 @@ public final class SettingsPanel {
         if (reply.contains("below speedUp")) return "여유는 단단하게 바꿀 속도보다 작아야 합니다.";
         if (reply.contains("engPedal")) return "엑셀 기준은 5~100% 입니다.";
         if (reply.contains("engHold")) return "엔진 유지 시간은 1~60초입니다.";
-        if (reply.contains("unknown key: runMode")) return "작동 모드 선택은 차량 모듈 0.4.4부터 됩니다. 차량 쪽을 먼저 올려 주세요.";
         if (reply.contains("unknown key: engNormal")) return "노멀 선택은 차량 모듈 0.4.1부터 됩니다. 차량 쪽을 먼저 올려 주세요.";
         if (reply.contains("speedHysteresis")) return "여유는 3 이상이어야 합니다.";
         return reply;
@@ -828,8 +821,6 @@ public final class SettingsPanel {
         engOn.set("1".equals(m.get("engOn")));
         carKnowsEngNormal = m.containsKey("engNormal");
         engNormal.set("1".equals(m.get("engNormal")));
-        carKnowsRunMode = m.containsKey("runMode");
-        setRunMode(carKnowsRunMode ? parse(m.get("runMode")) : 0);
         suspLinkEng.set("1".equals(m.get("suspLinkEng")));
         suspLinkSteer.set("1".equals(m.get("suspLinkSteer")));
         engLinkSusp.set("1".equals(m.get("engLinkSusp")));
@@ -901,7 +892,7 @@ public final class SettingsPanel {
         boolean custom = "1".equals(m.get("custom"));
         String modeName = "2".equals(mode) ? "에코" : "3".equals(mode) ? "스포츠"
                 : "6".equals(mode) ? (custom ? "마이 드라이브" : "스마트")
-                : "?".equals(mode) || mode == null ? "모드 모름" : "노멀·커스텀 " + mode;
+                : "?".equals(mode) || mode == null ? "모드 모름" : "커스텀 " + mode;
         int modeColor = "2".equals(mode) ? c.eco : "3".equals(mode) ? c.sport : "6".equals(mode) && custom ? c.info : c.muted;
         styleChip(modeChip, modeName, modeColor);
 
@@ -929,8 +920,7 @@ public final class SettingsPanel {
         item(2, "eco".equals(eng) ? "에코" : "normal".equals(eng) ? "노멀" : "sport".equals(eng) ? "스포츠" : "–", "sport".equals(eng),
                 m, "engOn", "E", null);
 
-        boolean active = m.containsKey("active") ? "1".equals(m.get("active")) : "6".equals(mode) && custom;
-        explain(m, on, active, modeName, kmh, up, pd, step, steer, eng);
+        explain(m, on, "6".equals(mode) && custom, modeName, kmh, up, pd, step, steer, eng);
 
         String latcal = m.get("latcal");
         String calib = latcal == null ? ("learning".equals(m.get("gyroScale")) ? "학습 중 (회전 " + m.get("turns") + "/3)" : "완료")
@@ -953,10 +943,10 @@ public final class SettingsPanel {
         boolean s0 = "firm".equals(step), s1 = "sport".equals(steer), s2 = "sport".equals(eng);
         if (!on) {
             pill = "자동 전환 꺼짐"; color = c.muted;
-            why = "자동 전환을 켜면 " + RUN_NAMES[runMode] + " 모드에서 바꿉니다.";
+            why = "자동 전환을 켜면 마이 드라이브 모드에서 바꿉니다.";
         } else if (!myDrive) {
             pill = "대기 중"; color = c.muted;
-            why = RUN_NAMES[runMode] + " 모드에서만 바꿉니다. 지금은 " + modeName + " 모드입니다.";
+            why = "마이 드라이브 모드에서만 바꿉니다. 지금은 " + modeName + " 모드입니다.";
         } else if (s0 || s1 || s2) {
             pill = "스포츠 주행 중"; color = c.sport;
             StringBuilder cause = new StringBuilder();
@@ -1140,49 +1130,6 @@ public final class SettingsPanel {
         b.setGravity(Gravity.CENTER);
         b.setBackgroundDrawable(pressable(primary ? c.accent : c.surface2, primary ? darker(c.accent) : c.line, dp(10)));
         return b;
-    }
-
-    static final String[] RUN_NAMES = {"마이 드라이브", "에코", "노멀"};
-
-    /**
-     * Which drive mode the module works in. Eco and Normal are for cars driven without the My Drive mode;
-     * the car may only store the item values there (test option, user 2026-11-18).
-     */
-    private View runModeRow() {
-        LinearLayout col = column(dp(6));
-        col.addView(text("작동할 드라이브 모드", 15, c.fg, MEDIUM));
-        col.addView(text("세 항목 모두 이 모드에서만 바꿉니다 · 에코·노멀은 시험 기능", 12, c.muted, null));
-        LinearLayout seg = new LinearLayout(activity);
-        seg.setPadding(dp(4), dp(4), dp(4), dp(4));
-        seg.setBackgroundDrawable(round(c.surface2, dp(10)));
-        for (int k = 0; k < 3; k++) {
-            final int which = k;
-            TextView b = text(RUN_NAMES[k], 14, c.muted, MEDIUM);
-            b.setGravity(Gravity.CENTER);
-            b.setOnClickListener(new View.OnClickListener() {
-                @Override public void onClick(View v) {
-                    if (runMode == which) return;
-                    setRunMode(which);
-                    changed();
-                }
-            });
-            runButtons[k] = b;
-            seg.addView(b, new LinearLayout.LayoutParams(0, dp(40), 1));
-        }
-        col.addView(seg);
-        setRunMode(runMode);
-        return col;
-    }
-
-    private void setRunMode(int k) {
-        runMode = k < 0 || k > 2 ? 0 : k;
-        for (int i = 0; i < 3; i++) {
-            TextView b = runButtons[i];
-            if (b == null) continue;
-            boolean sel = i == runMode;
-            b.setTextColor(sel ? c.onAccent : c.muted);
-            b.setBackgroundDrawable(sel ? round(c.accent, dp(8)) : null);
-        }
     }
 
     private View toggleRow(final Toggle t, String title, String hint, int size) {
