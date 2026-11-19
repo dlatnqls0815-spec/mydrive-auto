@@ -85,12 +85,28 @@ public final class SportOverrideController {
         if (targetValue < 0) return NO_VALUE;
 
         boolean known = currentValue >= 0;
+        long expectedApplied = appliedTarget != NO_VALUE ? appliedTarget : targetValue;
 
         // 1. Pending feedback check.
         if (pendingValue != NO_VALUE) {
             if (known && currentValue == pendingValue) {
+                if (pendingValue == savedOriginal) {
+                    savedOriginal = NO_VALUE;
+                    appliedTarget = NO_VALUE;
+                    fromRestart = false;
+                    inSport = false;
+                    sportOffSinceMs = Long.MIN_VALUE;
+                }
                 pendingValue = NO_VALUE;
                 pendingWasSportStart = false;
+                misses = 0;
+            } else if (pendingValue == savedOriginal && known && currentValue != expectedApplied) {
+                // A new manual value supersedes the restore, including while a retry is pending.
+                pendingValue = NO_VALUE;
+                savedOriginal = NO_VALUE;
+                appliedTarget = NO_VALUE;
+                fromRestart = false;
+                inSport = sportActive;
                 misses = 0;
             } else if (nowMs - pendingSinceMs >= PENDING_TIMEOUT_MS) {
                 lastMissedValue = pendingValue;
@@ -122,20 +138,14 @@ public final class SportOverrideController {
 
         if (!known) return NO_VALUE;
 
-        long expectedApplied = appliedTarget != NO_VALUE ? appliedTarget : targetValue;
+        expectedApplied = appliedTarget != NO_VALUE ? appliedTarget : targetValue;
 
         // 2. Option disabled: restore immediately (without release delay) if our sport value is still applied.
         if (!enabled) {
             if (savedOriginal != NO_VALUE) {
                 if (currentValue == expectedApplied && savedOriginal != currentValue) {
                     if (!canSend(nowMs)) return NO_VALUE;
-                    long restore = savedOriginal;
-                    savedOriginal = NO_VALUE;
-                    appliedTarget = NO_VALUE;
-                    fromRestart = false;
-                    inSport = false;
-                    sportOffSinceMs = Long.MIN_VALUE;
-                    return send(nowMs, restore, REASON_OPTION_OFF, false);
+                    return send(nowMs, savedOriginal, REASON_OPTION_OFF, false);
                 }
                 // Driver already changed the value by hand: do not send, just clear.
                 savedOriginal = NO_VALUE;
@@ -152,11 +162,7 @@ public final class SportOverrideController {
             if (!sportActive) {
                 if (savedOriginal != NO_VALUE && currentValue == targetValue && savedOriginal != currentValue) {
                     if (!canSend(nowMs)) return NO_VALUE;
-                    long restore = savedOriginal;
-                    savedOriginal = NO_VALUE;
-                    appliedTarget = NO_VALUE;
-                    fromRestart = false;
-                    return send(nowMs, restore, REASON_RESTORE_RESTART, false);
+                    return send(nowMs, savedOriginal, REASON_RESTORE_RESTART, false);
                 }
                 savedOriginal = NO_VALUE;
                 appliedTarget = NO_VALUE;
@@ -201,13 +207,7 @@ public final class SportOverrideController {
             if (targetValue != expectedApplied && savedOriginal != NO_VALUE) {
                 // Target setting changed while our sport value is applied.
                 if (!canSend(nowMs)) return NO_VALUE;
-                if (targetValue == savedOriginal) {
-                    long restore = savedOriginal;
-                    savedOriginal = NO_VALUE;
-                    appliedTarget = targetValue;
-                    return send(nowMs, restore, REASON_SPORT_START, false);
-                }
-                appliedTarget = targetValue;
+                if (targetValue != savedOriginal) appliedTarget = targetValue;
                 return send(nowMs, targetValue, REASON_SPORT_START, false);
             }
             return NO_VALUE;
@@ -231,12 +231,7 @@ public final class SportOverrideController {
         if (savedOriginal != NO_VALUE) {
             if (currentValue == expectedApplied && savedOriginal != currentValue) {
                 if (!canSend(nowMs)) return NO_VALUE;
-                long restore = savedOriginal;
-                savedOriginal = NO_VALUE;
-                appliedTarget = NO_VALUE;
-                inSport = false;
-                sportOffSinceMs = Long.MIN_VALUE;
-                return send(nowMs, restore, REASON_SPORT_END, false);
+                return send(nowMs, savedOriginal, REASON_SPORT_END, false);
             }
             savedOriginal = NO_VALUE;
             appliedTarget = NO_VALUE;

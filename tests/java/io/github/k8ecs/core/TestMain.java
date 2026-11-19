@@ -503,9 +503,10 @@ public final class TestMain {
                 "2.999 s since last send: still rate-limited");
         check(c.update(3100, true, 1, false, 1) == 4,
                 "3.0 s min gap reached: restores original theme 4 immediately");
-        check(ClusterThemeController.REASON_SPORT_END.equals(c.lastReason()) && c.savedOriginal() == -1,
-                "reason=sport end and savedOriginal cleared");
-        check(c.update(3500, true, 1, false, 4) == ClusterThemeController.NO_COMMAND && !c.hasPending(),
+        check(ClusterThemeController.REASON_SPORT_END.equals(c.lastReason()) && c.savedOriginal() == 4,
+                "reason=sport end and original retained until feedback");
+        check(c.update(3500, true, 1, false, 4) == ClusterThemeController.NO_COMMAND
+                && !c.hasPending() && c.savedOriginal() == -1,
                 "restore confirmed");
 
         // Immediate restore with no delay when >= 3 s already elapsed since sport start.
@@ -514,7 +515,7 @@ public final class TestMain {
         check(imm.update(300, true, 1, true, 1) == ClusterThemeController.NO_COMMAND, "imm: confirmed");
         check(imm.update(4000, true, 1, false, 1) == 4
                 && ClusterThemeController.REASON_SPORT_END.equals(imm.lastReason())
-                && imm.savedOriginal() == -1, "imm: sport off after >= 3 s restores at once");
+                && imm.savedOriginal() == 4, "imm: sport off after >= 3 s restores at once");
 
         // 2. Flapping within 3 s min gap does not restore; custom non-zero releaseMs still delays restore.
         ClusterThemeController flap = new ClusterThemeController();
@@ -594,8 +595,13 @@ public final class TestMain {
                 "rate limit blocks restore within 3 s of last send");
         check(optOff.update(2999, false, 1, true, 1) == ClusterThemeController.NO_COMMAND, "rate limit at 2.999 s");
         check(optOff.update(3000, false, 1, true, 1) == 4, "optOff: restores at 3.0 s");
-        check(ClusterThemeController.REASON_OPTION_OFF.equals(optOff.lastReason()) && optOff.savedOriginal() == -1,
-                "optOff: reason=option off and savedOriginal cleared");
+        check(ClusterThemeController.REASON_OPTION_OFF.equals(optOff.lastReason()) && optOff.savedOriginal() == 4,
+                "optOff: reason=option off and original retained until feedback");
+        check(optOff.update(6000, false, 1, true, 1) == 4 && optOff.misses() == 1,
+                "optOff: missed restore retries once");
+        check(optOff.update(6100, false, 1, true, 2) == ClusterThemeController.NO_COMMAND
+                && !optOff.hasPending() && optOff.savedOriginal() == -1,
+                "optOff: driver choice cancels the pending restore");
 
         ClusterThemeController optOffManual = new ClusterThemeController();
         check(optOffManual.update(0, true, 1, true, 4) == 1, "optOffManual: sport start");
@@ -609,8 +615,10 @@ public final class TestMain {
         check(restart.update(0, true, 1, false, -1) == ClusterThemeController.NO_COMMAND && restart.savedOriginal() == 4,
                 "restart: waits for known current theme");
         check(restart.update(500, true, 1, false, 1) == 4, "restart: restores original when not sport and at target");
-        check(ClusterThemeController.REASON_RESTORE_RESTART.equals(restart.lastReason()) && restart.savedOriginal() == -1,
+        check(ClusterThemeController.REASON_RESTORE_RESTART.equals(restart.lastReason()) && restart.savedOriginal() == 4,
                 "restart: reason=restore after restart");
+        check(restart.update(3500, true, 1, false, 1) == 4 && restart.misses() == 1,
+                "restart: retry missed restore at the rate limit");
 
         ClusterThemeController restartChanged = new ClusterThemeController(ClusterThemeController.DEFAULT_RELEASE_MS, 4);
         check(restartChanged.update(0, true, 1, false, 2) == ClusterThemeController.NO_COMMAND
@@ -672,8 +680,9 @@ public final class TestMain {
         check(a.update(3000, true, false, AmbientSportController.RED, 6) == blue,
                 "amb: restores blue at 3.0 s gap");
         check(AmbientSportController.REASON_SPORT_END.equals(a.lastReason())
-                && a.savedOriginal() == AmbientSportController.UNKNOWN_COLOR, "amb: reason=sport end and cleared");
-        check(a.update(3400, true, false, blue, 6) == AmbientSportController.NO_COMMAND && !a.hasPending(),
+                && a.savedOriginal() == blue, "amb: reason=sport end and original retained until feedback");
+        check(a.update(3400, true, false, blue, 6) == AmbientSportController.NO_COMMAND
+                && !a.hasPending() && a.savedOriginal() == AmbientSportController.UNKNOWN_COLOR,
                 "amb: restore confirmed");
 
         AmbientSportController imm = new AmbientSportController();
@@ -683,6 +692,13 @@ public final class TestMain {
         check(imm.update(4000, true, false, AmbientSportController.RED, 6) == blue
                 && AmbientSportController.REASON_SPORT_END.equals(imm.lastReason()),
                 "amb imm: restores at once after >= 3 s");
+        check(imm.update(6999, true, false, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb imm: restore retry waits for timeout");
+        check(imm.update(7000, true, false, AmbientSportController.RED, 6) == blue && imm.misses() == 1,
+                "amb imm: missed restore retries once");
+        check(imm.update(10000, true, false, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND
+                && imm.isHalted() && imm.savedOriginal() == blue,
+                "amb imm: second missed restore halts and preserves the original for recovery");
 
         // 2. Flapping within 3 s min gap and optional release delay.
         AmbientSportController flap = new AmbientSportController();
@@ -768,7 +784,7 @@ public final class TestMain {
                 "amb optOff: rate-limited within 3 s");
         check(optOff.update(3000, false, true, AmbientSportController.RED, 6) == blue
                 && AmbientSportController.REASON_OPTION_OFF.equals(optOff.lastReason())
-                && optOff.savedOriginal() == AmbientSportController.UNKNOWN_COLOR, "amb optOff: restores at 3 s");
+                && optOff.savedOriginal() == blue, "amb optOff: restores at 3 s");
 
         // 8. Restart restore from saved hex.
         long saved = AmbientSportController.parseHex("009b002100ef");
@@ -778,7 +794,7 @@ public final class TestMain {
                 && restart.savedOriginal() == blue, "amb restart: waits for known status");
         check(restart.update(500, true, false, AmbientSportController.RED, 6) == blue
                 && AmbientSportController.REASON_RESTORE_RESTART.equals(restart.lastReason())
-                && restart.savedOriginal() == AmbientSportController.UNKNOWN_COLOR,
+                && restart.savedOriginal() == blue,
                 "amb restart: restores original when not sport and at red");
 
         // 9. Factory theme original (hi 0x01) restored with exact bytes.
