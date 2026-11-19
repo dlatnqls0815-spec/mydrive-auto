@@ -184,6 +184,12 @@ public final class TestMain {
         check(!CarLog.isMyDrive(6, CarLog.SLOT_SMART), "mode 6 after smart chosen");
         check(!CarLog.isMyDrive(2, CarLog.SLOT_MY_DRIVE) && !CarLog.isMyDrive(3, -1) && !CarLog.isMyDrive(-1, 1), "eco sport unknown");
         check(CarLog.isMyDrive(5, CarLog.SLOT_SMART), "other mode byte counts as custom");
+        check(CarLog.clusterAutoSet("11-20 05:07:19.680 V/USMService(  599): -  Cluster_ThemeAutoSetStatus: 2") == CarLog.CLUSTER_LINK_ON,
+                "cluster link on (USMService)");
+        check(CarLog.clusterAutoSet("11-20 05:07:55.080 D/ThemeSettingService( 1755): onClusterContentReceived, nThemeStatus : 0, nThemeCount : 0, nThemeAutoSetStatus : 1") == CarLog.CLUSTER_LINK_OFF,
+                "cluster link off (ThemeSettingService)");
+        check(CarLog.clusterAutoSet("11-20 05:07:19.690 V/USMService(  599): -  Cluster_ThemeStatusNew: 15") == -1, "theme line is not autoSet");
+        check(CarLog.clusterTheme("11-20 05:07:19.690 V/USMService(  599): -  Cluster_ThemeStatusNew: 15") == -1, "15 (stock link) is not a theme");
         check(CarLog.clusterTheme("11-18 01:02:14.160 V/USMService(  609): -  Cluster_ThemeStatusNew: 4") == 4,
                 "USMService cluster theme 4");
         check(CarLog.clusterTheme("11-18 01:02:15.030 D/ThemeSettingService( 1774): onClusterETCStatusReceived, nThemeStatusNew : 4, nDisplayType : 0") == 4,

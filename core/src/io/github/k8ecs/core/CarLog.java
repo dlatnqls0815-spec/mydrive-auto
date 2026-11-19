@@ -27,6 +27,10 @@ public final class CarLog {
     private static final Pattern CLUSTER_THEME_USM = Pattern.compile("\\bCluster_ThemeStatusNew\\s*:\\s*(\\d+)");
     private static final Pattern CLUSTER_THEME_SETTING = Pattern.compile(
             "onClusterETCStatusReceived\\b.*\\bnThemeStatusNew\\s*:\\s*(\\d+)");
+    private static final Pattern CLUSTER_AUTOSET = Pattern.compile(
+            "\\b(?:Cluster_ThemeAutoSetStatus|nThemeAutoSetStatus)\\s*:\\s*(\\d+)");
+    /** Stock cluster "drive mode link" status: 1 off, 2 on (K8, seen on the car 2026-11-20). */
+    public static final int CLUSTER_LINK_OFF = 1, CLUSTER_LINK_ON = 2;
 
     /** Drive mode byte (byte 2) of a drive mode report; 0 (in transition) and 0x0f (boot) return -1. */
     public static int driveMode(String line) {
@@ -130,6 +134,22 @@ public final class CarLog {
      * or -1 when the line is not a cluster theme status line or the value is out of range.
      */
     public static int clusterTheme(String line) {
+        return clusterThemeRaw(line);
+    }
+
+    /** Stock cluster drive-mode-link status ({@link #CLUSTER_LINK_OFF}/{@link #CLUSTER_LINK_ON}) from a log line, or -1. */
+    public static int clusterAutoSet(String line) {
+        if (line == null) return -1;
+        Matcher m = CLUSTER_AUTOSET.matcher(line);
+        if (!m.find()) return -1;
+        try {
+            return Integer.parseInt(m.group(1));
+        } catch (NumberFormatException e) {
+            return -1;
+        }
+    }
+
+    private static int clusterThemeRaw(String line) {
         if (line == null) return -1;
         Matcher m = CLUSTER_THEME_USM.matcher(line);
         if (!m.find()) {

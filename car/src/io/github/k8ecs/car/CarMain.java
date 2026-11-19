@@ -47,7 +47,7 @@ import java.util.UUID;
  * moving forward. Settings over 127.0.0.1 TCP (head unit app) and Bluetooth RFCOMM (phone).
  */
 public final class CarMain {
-    static final String VERSION = "0.4.5";
+    static final String VERSION = "0.4.6";
     /** BCM getSpeed_KMHUnit() returns the display speed raw value in 0.5 km/h steps (65 = 32.5 km/h on the cluster). */
     static final float BCM_SPEED_RAW_PER_KMH = 2f;
     static final String LOG_DIR = "/data/nemesis/logs/k8ecs.damping";
@@ -370,6 +370,7 @@ public final class CarMain {
                     + "_orig_" + ClusterThemeController.themeLetter(clusterController.savedOriginal());
         }
         if (!clusterOnLocked()) return "off";
+        if (clusterAutoSet == CarLog.CLUSTER_LINK_ON) return "link_on";
         return "waiting";
     }
 
@@ -556,6 +557,16 @@ public final class CarMain {
                     saveStateLocked();
                 }
                 peakMilliG = 0;
+            }
+            return;
+        }
+        int as = CarLog.clusterAutoSet(line);
+        if (as >= 0) {
+            synchronized (lock) {
+                if (as != clusterAutoSet) {
+                    clusterAutoSet = as;
+                    Log.i("cluster autoSet " + as + (as == CarLog.CLUSTER_LINK_ON ? " (stock link on: cluster theme idle)" : ""));
+                }
             }
             return;
         }
@@ -770,7 +781,8 @@ public final class CarMain {
                         c.sent++;
                         c.lastReason = sendWhy[i];
                     }
-                    if (usm != null && ignitionOn && clusterController != null) {
+                    if (usm != null && ignitionOn && clusterController != null
+                            && clusterAutoSet != CarLog.CLUSTER_LINK_ON) {
                         int prevMisses = clusterController.misses();
                         boolean prevHalted = clusterController.isHalted();
                         int prevOrig = clusterController.savedOriginal();

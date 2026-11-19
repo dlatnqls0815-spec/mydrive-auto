@@ -186,7 +186,7 @@ K8 커스텀 화면 항목: 파워트레인(ECO/SPORT), 스티어링(NORMAL/SPOR
   헤드유닛 앱 화면. 자동 전환은 꺼진 상태(enabled=0)로 설치했다.
 - 미확인: 주행 중 송신·응답, 자이로 단위·부호 학습, 커스텀 모드의 byte 2 값(비순정 값이면 커스텀으로 간주), 휴대폰 앱 블루투스 연결.
 
-## 클러스터 스포츠 테마 (2026-11-20, 실차 미확인)
+## 클러스터 스포츠 테마 (2026-11-20, 0.4.5 실차 시험)
 
 - 호출(`IUSMService`, 인터페이스 `com.hkmc.usm.IUSMService`):
   - 현재 테마 읽기: `getCluster_ThemeStatusNew()`, Binder 트랜잭션 `0x22b` (읽기 전용).
@@ -195,7 +195,14 @@ K8 커스텀 화면 항목: 파워트레인(ECO/SPORT), 스티어링(NORMAL/SPOR
 - 로그캣 수신(`logcat` 필터에 `USMService:V`, `ThemeSettingService:D` 추가):
   - `USMService`: `Cluster_ThemeStatusNew: N`
   - `ThemeSettingService`: `nThemeStatusNew : N` (`onClusterETCStatusReceived` 줄)
-- 값 대응: `1..4 = 테마 A..D`는 순정 설정 앱의 raw→enum 표에서 추정한 값이며 실차 미확인이다(사용자 차량 부팅 로그에서는 테마 `4`, `autoSet` `1`로 관측됨).
+- 값 대응: `1..4 = 테마 A..D`. 실차에서 순정 메뉴로 B·A·C를 고를 때 `2`·`1`·`3`이 찍혀 확인했다(D=`4`는 순서상 추정).
+  순정 메뉴의 선택은 MICOM `USM_CLU_SET_ETC_C_REQ`(0x1124) `01 <값>`으로 나가고, 모듈의 `setCluster_ThemeStatusNew`도 같은 패킷을 만든다.
+- 순정 '드라이브 모드 연동'(`ThemeAutoSetStatus`/`nThemeAutoSetStatus`): `1` 꺼짐, `2` 켜짐. 켜져 있으면 테마 값이 `15`로 보고되고 차가 모드별 화면을 직접 정한다.
+  **이 기능은 연동이 꺼져 있어야 작동한다.** 모듈은 연동 켜짐(`2`)을 보면 전환하지 않고 상태를 `cluster=link_on`으로 알린다(0.4.6). 순정 메뉴에서 테마를 직접 고르면 연동이 꺼진다.
+- 실차 시험(2026-11-20, 정차):
+  - 0.4.5, 연동 꺼짐, 드라이브 모드 **스포츠**: 모듈이 테마 C(`3`)를 두 번 보냈지만 테마가 그대로여서 `HALT cluster: no feedback twice`로 멈췄다.
+  - 같은 명령을 **에코**에서 `service call`로 한 번 보냈을 때는 바로 `3`으로 바뀌었고, `1`로 되돌렸다.
+  - 즉 순정 스포츠 모드 중에는 클러스터가 테마 변경을 받지 않는 것으로 보인다. 마이 드라이브(`0x06`)에서의 동작은 아직 확인 전이다.
 - 동작 규칙(`ClusterThemeController`):
   - 순정 스포츠 모드(`0x03`)이거나 마이 드라이브에서 서스펜션·핸들·엔진 중 하나라도 피드백상 스포츠면 고른 테마로 바꾼다. 기본값은 꺼짐(`clusterOn=0`, `clusterTheme=1`).
   - 스포츠 상태가 끝나고 **5초** 연속 유지되면 원래 테마로 복귀한다(중간에 다시 스포츠가 되면 타이머 초기화).

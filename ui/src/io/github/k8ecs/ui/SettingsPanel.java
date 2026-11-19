@@ -640,7 +640,7 @@ public final class SettingsPanel {
                 "스포츠 모드이거나 마이 드라이브에서 엔진·서스펜션·핸들 중 하나라도 스포츠면 고른 테마로 바꾸고, 끝나면 원래 테마로 돌려놓아요.", 15));
         card.addView(divider());
         card.addView(choiceRow(clusterTheme, "스포츠 테마", null));
-        TextView note = text("순정 '드라이브 모드 연동'이 켜져 있으면 차가 테마를 따로 바꿀 수 있어요.", 12, c.muted, null);
+        TextView note = text("순정 클러스터 설정의 '드라이브 모드 연동'을 꺼야 작동해요. 순정 메뉴에서 테마를 직접 고르면 연동이 꺼져요.", 12, c.muted, null);
         note.setLineSpacing(0, 1.15f);
         card.addView(note);
         clusterStatus = text("", 12, c.muted, null);
@@ -981,6 +981,8 @@ public final class SettingsPanel {
             state = "꺼짐";
         } else if ("waiting".equals(st)) {
             state = "대기";
+        } else if ("link_on".equals(st)) {
+            state = "순정 드라이브 모드 연동이 켜져 있어요. 꺼야 작동해요";
         } else if ("halted".equals(st)) {
             state = "멈춤(응답 없음)";
         } else if (st != null && st.startsWith("sport_")) {
