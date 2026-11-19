@@ -81,7 +81,6 @@ public final class ClusterThemeController {
      * @return theme value (1..4) to send now, or {@link #NO_COMMAND}
      */
     public int update(long nowMs, boolean enabled, int targetTheme, boolean sportActive, int currentTheme) {
-        if (core.isHalted()) return NO_COMMAND;
         if (!isValidTheme(targetTheme)) return NO_COMMAND;
         long cur = isValidTheme(currentTheme) ? currentTheme : SportOverrideController.NO_VALUE;
         long cmd = core.update(nowMs, enabled, targetTheme, sportActive, cur);

@@ -49,7 +49,7 @@ import java.util.UUID;
  * moving forward. Settings over 127.0.0.1 TCP (head unit app) and Bluetooth RFCOMM (phone).
  */
 public final class CarMain {
-    static final String VERSION = "0.4.8";
+    static final String VERSION = "0.4.9";
     /** BCM getSpeed_KMHUnit() returns the display speed raw value in 0.5 km/h steps (65 = 32.5 km/h on the cluster). */
     static final float BCM_SPEED_RAW_PER_KMH = 2f;
     static final String LOG_DIR = "/data/nemesis/logs/k8ecs.damping";
@@ -756,8 +756,8 @@ public final class CarMain {
                 boolean needAutoSet;
                 synchronized (lock) {
                     if (Math.round(v) > 0) ignitionOn = true;
-                    boolean cActive = clusterController != null && !clusterController.isHalted()
-                            && (clusterOnLocked() || clusterController.savedOriginal() != -1 || clusterController.hasPending());
+                    boolean cActive = clusterController != null && (clusterController.savedOriginal() != -1
+                            || (!clusterController.isHalted() && clusterOnLocked()) || clusterController.hasPending());
                     wantUsm = cActive && ignitionOn;
                     knownUsmName = usmServiceName;
                     needAutoSet = clusterAutoSet < 0;

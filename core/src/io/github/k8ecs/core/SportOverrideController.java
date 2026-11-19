@@ -30,7 +30,7 @@ public final class SportOverrideController {
 
     private long pendingValue = NO_VALUE;
     private long pendingSinceMs = Long.MIN_VALUE;
-    private boolean pendingWasSportStart;
+    private boolean awaitingSportEntry;
     private long lastMissedValue = NO_VALUE;
     private int misses;
     private boolean halted;
@@ -64,13 +64,11 @@ public final class SportOverrideController {
         halted = false;
         misses = 0;
         pendingValue = NO_VALUE;
-        pendingWasSportStart = false;
     }
 
     /** Called when ignition goes off so an in-flight command does not falsely time out when IGN returns. */
     public void onIgnitionOff() {
         pendingValue = NO_VALUE;
-        pendingWasSportStart = false;
         sportOffSinceMs = Long.MIN_VALUE;
     }
 
@@ -85,10 +83,38 @@ public final class SportOverrideController {
      * @return value to send now, or {@link #NO_VALUE}
      */
     public long update(long nowMs, boolean enabled, long targetValue, boolean sportActive, long currentValue) {
-        if (halted) return NO_VALUE;
         if (targetValue < 0) return NO_VALUE;
 
         boolean known = currentValue >= 0;
+
+        // A timeout means the sport write is unconfirmed. It can still take effect after sport ends.
+        if (awaitingSportEntry) {
+            if (known && currentValue == appliedTarget) {
+                awaitingSportEntry = false;
+                pendingValue = NO_VALUE;
+                misses = 0;
+                halted = false;
+            } else if (known && currentValue != savedOriginal) {
+                awaitingSportEntry = false;
+                pendingValue = NO_VALUE;
+                savedOriginal = NO_VALUE;
+                appliedTarget = NO_VALUE;
+                inSport = enabled && sportActive;
+                sportOffSinceMs = Long.MIN_VALUE;
+                misses = 0;
+                return NO_VALUE;
+            } else {
+                trackSportExit(nowMs, sportActive);
+                if (hasPending() && nowMs - pendingSinceMs >= PENDING_TIMEOUT_MS) {
+                    recordTimeout();
+                }
+                if (!halted && !hasPending() && enabled && sportActive && known && canSend(nowMs)) {
+                    return send(nowMs, appliedTarget, REASON_SPORT_START);
+                }
+                return NO_VALUE;
+            }
+        }
+        if (halted) return NO_VALUE;
         long expectedApplied = appliedTarget != NO_VALUE ? appliedTarget : targetValue;
 
         // 1. Pending feedback check.
@@ -102,7 +128,6 @@ public final class SportOverrideController {
                     sportOffSinceMs = Long.MIN_VALUE;
                 }
                 pendingValue = NO_VALUE;
-                pendingWasSportStart = false;
                 misses = 0;
             } else if (pendingValue == savedOriginal && known && currentValue != expectedApplied) {
                 // A new manual value supersedes the restore, including while a retry is pending.
@@ -113,29 +138,11 @@ public final class SportOverrideController {
                 inSport = sportActive;
                 misses = 0;
             } else if (nowMs - pendingSinceMs >= PENDING_TIMEOUT_MS) {
-                lastMissedValue = pendingValue;
-                pendingValue = NO_VALUE;
-                misses++;
-                if (pendingWasSportStart) {
-                    savedOriginal = NO_VALUE;
-                    appliedTarget = NO_VALUE;
-                    inSport = false;
-                    sportOffSinceMs = Long.MIN_VALUE;
-                    pendingWasSportStart = false;
-                }
-                if (misses >= MAX_MISSES) {
-                    halted = true;
-                    return NO_VALUE;
-                }
+                recordTimeout();
+                if (halted) return NO_VALUE;
             } else {
                 // Keep tracking sport-off elapsed time while waiting for pending feedback.
-                if (inSport) {
-                    if (sportActive) {
-                        sportOffSinceMs = Long.MIN_VALUE;
-                    } else if (sportOffSinceMs == Long.MIN_VALUE) {
-                        sportOffSinceMs = nowMs;
-                    }
-                }
+                if (inSport) trackSportExit(nowMs, sportActive);
                 return NO_VALUE;
             }
         }
@@ -149,7 +156,7 @@ public final class SportOverrideController {
             if (savedOriginal != NO_VALUE) {
                 if (currentValue == expectedApplied && savedOriginal != currentValue) {
                     if (!canSend(nowMs)) return NO_VALUE;
-                    return send(nowMs, savedOriginal, REASON_OPTION_OFF, false);
+                    return send(nowMs, savedOriginal, REASON_OPTION_OFF);
                 }
                 // Driver already changed the value by hand: do not send, just clear.
                 savedOriginal = NO_VALUE;
@@ -166,7 +173,7 @@ public final class SportOverrideController {
             if (!sportActive) {
                 if (savedOriginal != NO_VALUE && currentValue == targetValue && savedOriginal != currentValue) {
                     if (!canSend(nowMs)) return NO_VALUE;
-                    return send(nowMs, savedOriginal, REASON_RESTORE_RESTART, false);
+                    return send(nowMs, savedOriginal, REASON_RESTORE_RESTART);
                 }
                 savedOriginal = NO_VALUE;
                 appliedTarget = NO_VALUE;
@@ -200,7 +207,8 @@ public final class SportOverrideController {
                 savedOriginal = currentValue;
                 appliedTarget = targetValue;
                 inSport = true;
-                return send(nowMs, targetValue, REASON_SPORT_START, true);
+                awaitingSportEntry = true;
+                return send(nowMs, targetValue, REASON_SPORT_START);
             }
             if (currentValue != expectedApplied) {
                 // Driver picked another value by hand during sport: cancel and do not fight back.
@@ -212,7 +220,7 @@ public final class SportOverrideController {
                 // Target setting changed while our sport value is applied.
                 if (!canSend(nowMs)) return NO_VALUE;
                 if (targetValue != savedOriginal) appliedTarget = targetValue;
-                return send(nowMs, targetValue, REASON_SPORT_START, false);
+                return send(nowMs, targetValue, REASON_SPORT_START);
             }
             return NO_VALUE;
         }
@@ -235,7 +243,7 @@ public final class SportOverrideController {
         if (savedOriginal != NO_VALUE) {
             if (currentValue == expectedApplied && savedOriginal != currentValue) {
                 if (!canSend(nowMs)) return NO_VALUE;
-                return send(nowMs, savedOriginal, REASON_SPORT_END, false);
+                return send(nowMs, savedOriginal, REASON_SPORT_END);
             }
             savedOriginal = NO_VALUE;
             appliedTarget = NO_VALUE;
@@ -249,10 +257,21 @@ public final class SportOverrideController {
         return lastSendMs == Long.MIN_VALUE || nowMs - lastSendMs >= MIN_GAP_MS;
     }
 
-    private long send(long nowMs, long value, String reason, boolean sportStart) {
+    private void trackSportExit(long nowMs, boolean sportActive) {
+        if (sportActive) sportOffSinceMs = Long.MIN_VALUE;
+        else if (sportOffSinceMs == Long.MIN_VALUE) sportOffSinceMs = nowMs;
+    }
+
+    private void recordTimeout() {
+        lastMissedValue = pendingValue;
+        pendingValue = NO_VALUE;
+        misses++;
+        if (misses >= MAX_MISSES) halted = true;
+    }
+
+    private long send(long nowMs, long value, String reason) {
         pendingValue = value;
         pendingSinceMs = nowMs;
-        pendingWasSportStart = sportStart;
         lastSendMs = nowMs;
         lastReason = reason;
         return value;

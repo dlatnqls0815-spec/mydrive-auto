@@ -591,6 +591,13 @@ public final class TestMain {
         halt.clearHalt();
         check(!halt.isHalted() && halt.misses() == 0, "halt: clearHalt resets halt state");
 
+        ClusterThemeController late = new ClusterThemeController();
+        late.update(0, true, 1, true, 4);
+        late.update(3000, true, 1, true, 4);
+        late.update(6000, true, 1, true, 4);
+        check(late.isHalted() && late.update(7000, true, 1, false, 1) == 4,
+                "cluster restores a sport theme confirmed after timeout");
+
         // 7. Option off restores immediately; respects rate limit (3 s).
         ClusterThemeController optOff = new ClusterThemeController();
         check(optOff.update(0, true, 1, true, 4) == 1, "optOff: sport start");
@@ -720,6 +727,37 @@ public final class TestMain {
         check(imm.update(10000, true, false, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND
                 && imm.isHalted() && imm.savedOriginal() == blue,
                 "amb imm: second missed restore halts and preserves the original for recovery");
+
+        AmbientSportController lateEntry = new AmbientSportController(5000L);
+        check(lateEntry.update(0, true, true, theme, 6) == AmbientSportController.RED, "late entry: send red");
+        lateEntry.update(1000, true, false, theme, 6);
+        check(lateEntry.update(3000, true, false, theme, 6) == AmbientSportController.NO_COMMAND
+                && lateEntry.savedOriginal() == theme, "late entry: a timeout after sport exit retains the original");
+        check(lateEntry.update(4000, true, false, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND
+                && lateEntry.update(6000, true, false, AmbientSportController.RED, 6) == theme,
+                "late entry: restore a late red after the configured sport-off delay");
+
+        AmbientSportController lateAfterHalt = new AmbientSportController();
+        lateAfterHalt.update(0, true, true, theme, 6);
+        lateAfterHalt.update(3000, true, true, theme, 6);
+        lateAfterHalt.update(6000, true, true, theme, 6);
+        check(lateAfterHalt.isHalted() && lateAfterHalt.savedOriginal() == theme,
+                "late entry: two misses stop further sport commands and preserve the original");
+        check(lateAfterHalt.update(7000, true, false, AmbientSportController.RED, 6) == theme,
+                "late entry: a confirmed red can still restore after the entry halt");
+
+        AmbientSportController disabledBeforeAck = new AmbientSportController(5000L);
+        disabledBeforeAck.update(0, true, true, theme, 6);
+        disabledBeforeAck.update(3000, false, true, theme, 6);
+        check(disabledBeforeAck.update(4000, false, true, AmbientSportController.RED, 6) == theme,
+                "late entry: disabling during the write restores late red without a sport-exit delay");
+
+        AmbientSportController manualBeforeAck = new AmbientSportController();
+        manualBeforeAck.update(0, true, true, theme, 6);
+        check(manualBeforeAck.update(500, true, true, blue, 6) == AmbientSportController.NO_COMMAND
+                && manualBeforeAck.update(3000, true, true, blue, 6) == AmbientSportController.NO_COMMAND
+                && manualBeforeAck.savedOriginal() == AmbientSportController.UNKNOWN_COLOR,
+                "late entry: a third color cancels the pending override");
 
         // 2. Flapping within 3 s min gap and optional release delay.
         AmbientSportController flap = new AmbientSportController();
