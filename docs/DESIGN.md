@@ -185,3 +185,23 @@ K8 커스텀 화면 항목: 파워트레인(ECO/SPORT), 스티어링(NORMAL/SPOR
 - 확인됨(정차): 서비스 실행, 자이로 10Hz 수신·영점 35 학습, 속도 getter, 설정 포트 응답, 시작 시 서스펜션 값 읽기(feedback 5 = 스포츠),
   헤드유닛 앱 화면. 자동 전환은 꺼진 상태(enabled=0)로 설치했다.
 - 미확인: 주행 중 송신·응답, 자이로 단위·부호 학습, 커스텀 모드의 byte 2 값(비순정 값이면 커스텀으로 간주), 휴대폰 앱 블루투스 연결.
+
+## 클러스터 스포츠 테마 (2026-11-20, 실차 미확인)
+
+- 호출(`IUSMService`, 인터페이스 `com.hkmc.usm.IUSMService`):
+  - 현재 테마 읽기: `getCluster_ThemeStatusNew()`, Binder 트랜잭션 `0x22b` (읽기 전용).
+  - 테마 설정: `setCluster_ThemeStatusNew(int)`, 트랜잭션 `0xc4`, 값 `1..4`만 허용.
+  - 드라이브 모드 연동 여부 읽기: `getCluster_ThemeAutoSetStatus()`, 트랜잭션 `0x1ac` (읽기 전용, 설정 호출 안 함).
+- 로그캣 수신(`logcat` 필터에 `USMService:V`, `ThemeSettingService:D` 추가):
+  - `USMService`: `Cluster_ThemeStatusNew: N`
+  - `ThemeSettingService`: `nThemeStatusNew : N` (`onClusterETCStatusReceived` 줄)
+- 값 대응: `1..4 = 테마 A..D`는 순정 설정 앱의 raw→enum 표에서 추정한 값이며 실차 미확인이다(사용자 차량 부팅 로그에서는 테마 `4`, `autoSet` `1`로 관측됨).
+- 동작 규칙(`ClusterThemeController`):
+  - 순정 스포츠 모드(`0x03`)이거나 마이 드라이브에서 서스펜션·핸들·엔진 중 하나라도 피드백상 스포츠면 고른 테마로 바꾼다. 기본값은 꺼짐(`clusterOn=0`, `clusterTheme=1`).
+  - 스포츠 상태가 끝나고 **5초** 연속 유지되면 원래 테마로 복귀한다(중간에 다시 스포츠가 되면 타이머 초기화).
+  - 스포츠 중이거나 복귀 대기 중에 운전자가 테마를 직접 바꾸면 덮어쓰지 않고 이번 전환을 취소한다.
+  - 응답이 3초 안에 안 맞으면 1회 재시도하고, **2회 실패**하면 클러스터 전환만 멈춘다(`halted`, "정지 해제"로 복구).
+  - 재시작 시 `state.txt`의 `clusterOrig`를 읽어 스포츠 상태가 끝나 있으면 원래 테마로 복귀한다.
+- 첫 현장 확인(주차 상태):
+  1. 모듈 상태(`STATUS` / 앱 상태 줄)에서 `clusterTheme`과 `clusterAutoSet`이 읽히는지 확인한다.
+  2. 옵션을 켜고 드라이브 모드를 **에코 → 스포츠 → 에코**로 한 번 전환해 고른 테마로 바뀌었다가 5초 뒤 원래 테마로 돌아오는지 확인한다.

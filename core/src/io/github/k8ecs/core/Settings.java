@@ -42,6 +42,10 @@ public final class Settings {
     // Links: when one item's own rule goes sport, also put the other item to sport.
     public final boolean engLinkSusp, engLinkSteer, suspLinkEng, suspLinkSteer;
 
+    // Cluster sport theme: switch cluster theme in Sport or when any My Drive item is in Sport.
+    public final boolean clusterOn;
+    public final int clusterTheme;    // 1..4 (theme A..D)
+
     private Settings(Map<String, String> m) {
         enabled = flag(m, "enabled");
         suspOn = flag(m, "suspOn");
@@ -67,12 +71,17 @@ public final class Settings {
         engLinkSteer = flag(m, "engLinkSteer");
         suspLinkEng = flag(m, "suspLinkEng");
         suspLinkSteer = flag(m, "suspLinkSteer");
+        clusterOn = flag(m, "clusterOn");
+        clusterTheme = num(m, "clusterTheme");
 
         speedRule("speedUp", speedUpKmh, hysteresisKmh, "speedHysteresis");
         speedRule("steerSpeedUp", steerSpeedUpKmh, steerHysteresisKmh, "steerHyst");
         if (Double.isNaN(gyroScale) || Math.abs(gyroScale) > 10) throw new IllegalArgumentException("gyroScale");
         if (engPedalPct < 5 || engPedalPct > 100) throw new IllegalArgumentException("engPedal 5..100");
         if (engHoldMs < 1000 || engHoldMs > 60000) throw new IllegalArgumentException("engHold 1..60 s");
+        if (clusterTheme < ClusterThemeController.MIN_THEME || clusterTheme > ClusterThemeController.MAX_THEME) {
+            throw new IllegalArgumentException("clusterTheme 1..4");
+        }
         toRules(); // validates the rest
         steerRules();
     }
@@ -107,6 +116,8 @@ public final class Settings {
         m.put("engLinkSteer", "0");
         m.put("suspLinkEng", "0");
         m.put("suspLinkSteer", "0");
+        m.put("clusterOn", "0");
+        m.put("clusterTheme", "1");
         return m;
     }
 
@@ -160,6 +171,8 @@ public final class Settings {
         m.put("engLinkSteer", engLinkSteer ? "1" : "0");
         m.put("suspLinkEng", suspLinkEng ? "1" : "0");
         m.put("suspLinkSteer", suspLinkSteer ? "1" : "0");
+        m.put("clusterOn", clusterOn ? "1" : "0");
+        m.put("clusterTheme", Integer.toString(clusterTheme));
         return m;
     }
 

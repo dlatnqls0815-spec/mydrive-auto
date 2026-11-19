@@ -28,7 +28,7 @@ final class SeogaemoBridge {
     // One Seogaemo card (k8-mydrive) carries all three items, their links and the shared limits.
     static final String[] PROPS = {"mydrive", "suspon", "speedup", "hyst", "corner_on", "corner_off", "dwell", "lnk_se",
             "lnk_sh", "steeron", "steerup", "steerhyst", "steercon", "steercoff", "steerdwell", "engon", "engpedal",
-            "enghold", "lnk_es", "lnk_eh", "maxpm"};
+            "enghold", "lnk_es", "lnk_eh", "maxpm", "cl_on", "cl_th"};
     private String lastKey;
     private boolean lastOn;
     private Method getProp, setProp;
@@ -111,6 +111,8 @@ final class SeogaemoBridge {
         {"e_sus", "lnk_es", "0", ""},
         {"e_str", "lnk_eh", "0", ""},
         {"mx", "maxpm", "1", "4|6|8|10|12|15|20"},
+        {"c_on", "cl_on", "0", ""},
+        {"c_th", "cl_th", "1", "1|2|3|4"},
     };
 
     static final String SG_ROOT = "/data/nemesis/apps/hmg-seogaemo/bin/hmg-seogaemo-root";
@@ -126,7 +128,7 @@ final class SeogaemoBridge {
                 s.suspLinkEng ? 1 : 0, s.suspLinkSteer ? 1 : 0, s.steerOn ? 1 : 0, s.steerSpeedUpKmh,
                 s.steerHysteresisKmh, s.steerCornerOnMilliG, s.steerCornerOffMilliG, s.steerDwellMs,
                 s.engOn ? 1 : 0, s.engPedalPct, s.engHoldMs, s.engLinkSusp ? 1 : 0, s.engLinkSteer ? 1 : 0,
-                s.maxPerMinute};
+                s.maxPerMinute, s.clusterOn ? 1 : 0, s.clusterTheme};
         String[] out = new String[CARD.length];
         for (int i = 0; i < CARD.length; i++) {
             int div = Integer.parseInt(CARD[i][2]);
@@ -293,6 +295,8 @@ final class SeogaemoBridge {
 
     /** Seogaemo values (toggles on/off, km/h, 0.01 g, seconds) to the module's setting line. Throws on bad values. */
     static String toSettings(Map<String, String> v) {
+        String clOn = v.get("cl_on");
+        String clTh = v.get("cl_th");
         return "enabled=1 suspOn=" + tog(v.get("suspon")) + " speedUp=" + num(v.get("speedup")) + " hyst=" + num(v.get("hyst"))
                 + " cornerOn=" + num(v.get("corner_on")) * 10 + " cornerOff=" + num(v.get("corner_off")) * 10
                 + " dwell=" + num(v.get("dwell")) * 1000 + " suspLinkEng=" + tog(v.get("lnk_se"))
@@ -302,7 +306,9 @@ final class SeogaemoBridge {
                 + " steerCornerOff=" + num(v.get("steercoff")) * 10 + " steerDwell=" + num(v.get("steerdwell")) * 1000
                 + " engOn=" + tog(v.get("engon")) + " engPedal=" + num(v.get("engpedal"))
                 + " engHold=" + num(v.get("enghold")) * 1000 + " engLinkSusp=" + tog(v.get("lnk_es"))
-                + " engLinkSteer=" + tog(v.get("lnk_eh")) + " maxPerMin=" + num(v.get("maxpm"));
+                + " engLinkSteer=" + tog(v.get("lnk_eh")) + " maxPerMin=" + num(v.get("maxpm"))
+                + (clOn != null && clOn.length() > 0 ? " clusterOn=" + tog(clOn) : "")
+                + (clTh != null && clTh.length() > 0 ? " clusterTheme=" + num(clTh) : "");
     }
 
     static int tog(String x) {

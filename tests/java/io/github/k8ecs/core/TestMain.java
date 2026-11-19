@@ -32,6 +32,7 @@ public final class TestMain {
         accelLateral();
         pedal();
         links();
+        clusterTheme();
         System.out.println("core tests passed: " + passed);
     }
 
@@ -146,7 +147,14 @@ public final class TestMain {
         try { Settings.parse("engPedal=2", d); } catch (IllegalArgumentException e) { badPedal = true; }
         check(badPedal, "pedal threshold below 5% rejected");
         check(Settings.parse("speedUp=0", d).toRules().speedUpKmh.length == 0, "speed rule off");
-        String[] bad = {"speedUp=10", "cornerOn=50", "cornerOff=300", "dwell=100", "foo=1", "speedUp", "gyroScale=NaN"};
+        check(!d.clusterOn && d.clusterTheme == 1, "cluster sport theme off, theme A (1) by default");
+        Settings cl = Settings.parse("clusterOn=1 clusterTheme=3", d);
+        check(cl.clusterOn && cl.clusterTheme == 3, "cluster settings parsed");
+        check(Settings.parse(cl.encode(), d).encode().equals(cl.encode()), "cluster settings round trip");
+        check(Settings.parse("enabled=1", d).encode().contains("clusterOn=0 clusterTheme=1"),
+                "old config without cluster keys keeps defaults");
+        String[] bad = {"speedUp=10", "cornerOn=50", "cornerOff=300", "dwell=100", "foo=1", "speedUp", "gyroScale=NaN",
+                "clusterOn=2", "clusterTheme=0", "clusterTheme=5", "clusterTheme=abc"};
         for (String b : bad) {
             boolean threw = false;
             try { Settings.parse(b, d); } catch (IllegalArgumentException e) { threw = true; }
@@ -176,6 +184,20 @@ public final class TestMain {
         check(!CarLog.isMyDrive(6, CarLog.SLOT_SMART), "mode 6 after smart chosen");
         check(!CarLog.isMyDrive(2, CarLog.SLOT_MY_DRIVE) && !CarLog.isMyDrive(3, -1) && !CarLog.isMyDrive(-1, 1), "eco sport unknown");
         check(CarLog.isMyDrive(5, CarLog.SLOT_SMART), "other mode byte counts as custom");
+        check(CarLog.clusterTheme("11-18 01:02:14.160 V/USMService(  609): -  Cluster_ThemeStatusNew: 4") == 4,
+                "USMService cluster theme 4");
+        check(CarLog.clusterTheme("11-18 01:02:15.030 D/ThemeSettingService( 1774): onClusterETCStatusReceived, nThemeStatusNew : 4, nDisplayType : 0") == 4,
+                "ThemeSettingService cluster theme 4");
+        check(CarLog.clusterTheme("11-18 01:02:14.160 V/USMService(  609): -  Cluster_ThemeStatusNew: 1") == 1,
+                "USMService cluster theme 1");
+        check(CarLog.clusterTheme("11-18 01:02:15.030 D/ThemeSettingService( 1774): onClusterETCStatusReceived, nThemeStatusNew : 2, nDisplayType : 0") == 2,
+                "ThemeSettingService cluster theme 2");
+        check(CarLog.clusterTheme("11-18 01:02:14.160 V/USMService(  609): -  Cluster_ThemeStatusNew: 0") == -1,
+                "cluster theme 0 rejected");
+        check(CarLog.clusterTheme("11-18 01:02:14.160 V/USMService(  609): -  Cluster_ThemeStatusNew: 5") == -1,
+                "cluster theme 5 rejected");
+        check(CarLog.clusterTheme(p + "nothing") == -1, "unrelated line returns -1");
+        check(CarLog.clusterTheme(null) == -1, "null line returns -1");
     }
 
     private static void speedHysteresis() {
@@ -429,6 +451,134 @@ public final class TestMain {
         check(p.update(2000, 90, 2000, true, true, false, false) == 0, "own pedal rule off: pedal ignored, back to eco");
         Settings s = Settings.parse("engLinkSusp=1 suspLinkSteer=1", Settings.defaults());
         check(s.engLinkSusp && s.suspLinkSteer && !s.engLinkSteer && !s.suspLinkEng, "link options parsed");
+    }
+
+    private static void clusterTheme() {
+        // 1. Sport start, release delay (5 s), and sport end restore.
+        ClusterThemeController c = new ClusterThemeController();
+        check(c.update(0, true, 1, true, -1) == ClusterThemeController.NO_COMMAND, "unknown current theme: no command");
+        check(c.update(100, true, 1, true, 4) == 1, "sport start switches 4 -> 1");
+        check(ClusterThemeController.REASON_SPORT_START.equals(c.lastReason()) && c.savedOriginal() == 4,
+                "savedOriginal=4 and reason=sport start");
+        check(c.update(500, true, 1, true, 1) == ClusterThemeController.NO_COMMAND && !c.hasPending(),
+                "matching feedback clears pending");
+        check(c.update(1000, true, 1, false, 1) == ClusterThemeController.NO_COMMAND, "sport off starts release delay");
+        check(c.update(5900, true, 1, false, 1) == ClusterThemeController.NO_COMMAND, "4.9 s off: still waiting");
+        check(c.update(6000, true, 1, false, 1) == 4, "5.0 s off: restores original theme 4");
+        check(ClusterThemeController.REASON_SPORT_END.equals(c.lastReason()) && c.savedOriginal() == -1,
+                "reason=sport end and savedOriginal cleared");
+        check(c.update(6500, true, 1, false, 4) == ClusterThemeController.NO_COMMAND && !c.hasPending(),
+                "restore confirmed");
+
+        // 2. Flapping inside the release delay resets the timer.
+        ClusterThemeController flap = new ClusterThemeController();
+        check(flap.update(0, true, 2, true, 4) == 2, "flap: sport start");
+        check(flap.update(200, true, 2, true, 2) == ClusterThemeController.NO_COMMAND, "flap: confirmed");
+        check(flap.update(1000, true, 2, false, 2) == ClusterThemeController.NO_COMMAND, "flap: sport off");
+        check(flap.update(5000, true, 2, false, 2) == ClusterThemeController.NO_COMMAND, "flap: 4 s off");
+        check(flap.update(5500, true, 2, true, 2) == ClusterThemeController.NO_COMMAND, "flap: sport back on resets delay");
+        check(flap.update(6000, true, 2, false, 2) == ClusterThemeController.NO_COMMAND, "flap: off again");
+        check(flap.update(10900, true, 2, false, 2) == ClusterThemeController.NO_COMMAND, "flap: 4.9 s since second off");
+        check(flap.update(11000, true, 2, false, 2) == 4, "flap: restores after full 5 s continuous off");
+
+        // 3. Manual change during sport cancels without fighting back until next sport start.
+        ClusterThemeController manual = new ClusterThemeController();
+        check(manual.update(0, true, 1, true, 4) == 1, "manual: sport start");
+        check(manual.update(300, true, 1, true, 1) == ClusterThemeController.NO_COMMAND, "manual: confirmed");
+        check(manual.update(4000, true, 1, true, 3) == ClusterThemeController.NO_COMMAND && manual.savedOriginal() == -1,
+                "manual change during sport cancels and clears savedOriginal");
+        check(manual.update(8000, true, 1, true, 3) == ClusterThemeController.NO_COMMAND,
+                "manual: does not fight back while still in sport");
+        check(manual.update(9000, true, 1, false, 3) == ClusterThemeController.NO_COMMAND, "manual: sport off");
+        check(manual.update(15000, true, 1, false, 3) == ClusterThemeController.NO_COMMAND,
+                "manual: sport end does not overwrite driver choice");
+        check(manual.update(16000, true, 1, true, 3) == 1 && manual.savedOriginal() == 3,
+                "manual: next sport start saves new theme 3 and sends target 1");
+
+        // 4. Manual change during release delay cancels restore.
+        ClusterThemeController manualEnd = new ClusterThemeController();
+        check(manualEnd.update(0, true, 1, true, 4) == 1, "manualEnd: sport start");
+        check(manualEnd.update(300, true, 1, true, 1) == ClusterThemeController.NO_COMMAND, "manualEnd: confirmed");
+        check(manualEnd.update(1000, true, 1, false, 1) == ClusterThemeController.NO_COMMAND, "manualEnd: sport off");
+        check(manualEnd.update(2000, true, 1, false, 2) == ClusterThemeController.NO_COMMAND && manualEnd.savedOriginal() == -1,
+                "manualEnd: driver changed during release delay");
+        check(manualEnd.update(7000, true, 1, false, 2) == ClusterThemeController.NO_COMMAND,
+                "manualEnd: no restore after driver changed");
+
+        // 5. Already at target: nothing sent, savedOriginal stays -1, nothing restored.
+        ClusterThemeController same = new ClusterThemeController();
+        check(same.update(0, true, 4, true, 4) == ClusterThemeController.NO_COMMAND && same.savedOriginal() == -1,
+                "already at target: no command and no savedOriginal");
+        check(same.update(1000, true, 4, false, 4) == ClusterThemeController.NO_COMMAND, "already at target: sport off");
+        check(same.update(7000, true, 4, false, 4) == ClusterThemeController.NO_COMMAND, "already at target: nothing restored");
+
+        // 6. Pending misses: matching feedback resets misses; 2 misses -> halted.
+        ClusterThemeController recover = new ClusterThemeController();
+        check(recover.update(0, true, 1, true, 4) == 1, "recover: first send");
+        check(recover.update(2900, true, 1, true, 4) == ClusterThemeController.NO_COMMAND && recover.misses() == 0,
+                "recover: still waiting before 3 s timeout");
+        check(recover.update(3000, true, 1, true, 4) == 1 && recover.misses() == 1 && !recover.isHalted(),
+                "recover: first miss retries at 3 s");
+        check(recover.update(3500, true, 1, true, 1) == ClusterThemeController.NO_COMMAND && recover.misses() == 0,
+                "recover: matching feedback resets misses");
+
+        ClusterThemeController halt = new ClusterThemeController();
+        check(halt.update(0, true, 1, true, 4) == 1, "halt: first send");
+        check(halt.update(3000, true, 1, true, 4) == 1 && halt.misses() == 1 && !halt.isHalted(),
+                "halt: 1st miss -> retry");
+        check(halt.update(6000, true, 1, true, 4) == ClusterThemeController.NO_COMMAND && halt.misses() == 2 && halt.isHalted(),
+                "halt: 2nd miss -> halted");
+        check(halt.update(20000, true, 1, true, 4) == ClusterThemeController.NO_COMMAND && halt.isHalted(),
+                "halt: stays halted");
+        halt.clearHalt();
+        check(!halt.isHalted() && halt.misses() == 0, "halt: clearHalt resets halt state");
+
+        // 7. Option off restores immediately without release delay; respects rate limit (3 s).
+        ClusterThemeController optOff = new ClusterThemeController();
+        check(optOff.update(0, true, 1, true, 4) == 1, "optOff: sport start");
+        check(optOff.update(400, true, 1, true, 1) == ClusterThemeController.NO_COMMAND, "optOff: confirmed");
+        check(optOff.update(1000, false, 1, true, 1) == ClusterThemeController.NO_COMMAND && optOff.savedOriginal() == 4,
+                "rate limit blocks restore within 3 s of last send");
+        check(optOff.update(2999, false, 1, true, 1) == ClusterThemeController.NO_COMMAND, "rate limit at 2.999 s");
+        check(optOff.update(3000, false, 1, true, 1) == 4, "optOff: restores at 3.0 s without 5 s release delay");
+        check(ClusterThemeController.REASON_OPTION_OFF.equals(optOff.lastReason()) && optOff.savedOriginal() == -1,
+                "optOff: reason=option off and savedOriginal cleared");
+
+        ClusterThemeController optOffManual = new ClusterThemeController();
+        check(optOffManual.update(0, true, 1, true, 4) == 1, "optOffManual: sport start");
+        check(optOffManual.update(400, true, 1, true, 1) == ClusterThemeController.NO_COMMAND, "optOffManual: confirmed");
+        check(optOffManual.update(4000, false, 1, true, 2) == ClusterThemeController.NO_COMMAND && optOffManual.savedOriginal() == -1,
+                "optOffManual: user changed theme -> do not overwrite on option off");
+
+        // 8. Restart restore from persisted savedOriginal.
+        ClusterThemeController restart = new ClusterThemeController(ClusterThemeController.DEFAULT_RELEASE_MS, 4);
+        check(restart.savedOriginal() == 4, "restart: persisted original loaded");
+        check(restart.update(0, true, 1, false, -1) == ClusterThemeController.NO_COMMAND && restart.savedOriginal() == 4,
+                "restart: waits for known current theme");
+        check(restart.update(500, true, 1, false, 1) == 4, "restart: restores original when not sport and at target");
+        check(ClusterThemeController.REASON_RESTORE_RESTART.equals(restart.lastReason()) && restart.savedOriginal() == -1,
+                "restart: reason=restore after restart");
+
+        ClusterThemeController restartChanged = new ClusterThemeController(ClusterThemeController.DEFAULT_RELEASE_MS, 4);
+        check(restartChanged.update(0, true, 1, false, 2) == ClusterThemeController.NO_COMMAND
+                && restartChanged.savedOriginal() == -1, "restart: user changed theme -> no restore");
+
+        ClusterThemeController restartInSport = new ClusterThemeController(ClusterThemeController.DEFAULT_RELEASE_MS, 4);
+        check(restartInSport.update(0, true, 1, true, 1) == ClusterThemeController.NO_COMMAND
+                && restartInSport.savedOriginal() == 4, "restart in sport: keeps savedOriginal");
+        check(restartInSport.update(1000, true, 1, false, 1) == ClusterThemeController.NO_COMMAND,
+                "restart in sport: waits for release delay");
+        check(restartInSport.update(6000, true, 1, false, 1) == 4
+                && ClusterThemeController.REASON_SPORT_END.equals(restartInSport.lastReason()),
+                "restart in sport: restores when sport ends");
+
+        // 9. Ignition off clears pending so no false miss occurs on return.
+        ClusterThemeController ign = new ClusterThemeController();
+        check(ign.update(0, true, 1, true, 4) == 1 && ign.hasPending(), "ign: send starts pending");
+        ign.onIgnitionOff();
+        check(!ign.hasPending(), "ign: onIgnitionOff clears pending");
+        check(ign.update(10000, true, 1, true, 1) == ClusterThemeController.NO_COMMAND && ign.misses() == 0,
+                "ign: no false miss after ignition returns");
     }
 
 }

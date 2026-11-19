@@ -22,5 +22,7 @@ choice setting=e_hd label=@e_hd when=e
 toggle setting=e_sus label=@e_sus when=e
 toggle setting=e_str label=@e_str when=e
 choice setting=mx label=@mx
+toggle setting=c_on label=@c_on
+choice setting=c_th label=@c_th
 value label=@cf key=cf
 button name=save_log label=@save_log

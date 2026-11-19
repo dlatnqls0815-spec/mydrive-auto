@@ -77,19 +77,20 @@ public final class SettingsPanel {
     private TextView speedValue, modeChip, footer;
     private MeterRow speedRow, latRow, pedalRow;
     private TextView[] itemState = new TextView[3], itemBadge = new TextView[3];
-    private boolean carKnowsEngNormal;
-    private Toggle enabled, suspOn, steerOn, engOn, engNormal, suspLinkEng, suspLinkSteer, engLinkSusp, engLinkSteer;
+    private boolean carKnowsEngNormal, carKnowsCluster;
+    private Toggle enabled, suspOn, steerOn, engOn, engNormal, suspLinkEng, suspLinkSteer, engLinkSusp, engLinkSteer, clusterOn;
+    private Choice clusterTheme;
     private Stepper speedUp, hyst, cornerOn, cornerOff, dwell, maxPerMin;
     private Stepper steerSpeedUp, steerHyst, steerCornerOn, steerCornerOff, steerDwell;
     private Stepper engPedal, engHold;
     private final LinearLayout[] tabs = new LinearLayout[3];
     private final TextView[] tabButtons = new TextView[3];
     private TextView saveButton;
-    // head unit pages: 0 main (live board, full screen), 1-3 settings, 4 tools
-    private final TextView[] pageButtons = new TextView[5];
-    private View mainPage, settingsArea, toolsPage;
+    // head unit pages: 0 main (live board, full screen), 1-4 settings, 5 tools
+    private final TextView[] pageButtons = new TextView[6];
+    private View mainPage, settingsArea, toolsPage, clusterCard;
     private final View[] linkCards = new View[3];
-    private TextView statusPill, reasonText, mainMessage, topSave;
+    private TextView statusPill, reasonText, mainMessage, topSave, clusterStatus;
     private volatile boolean polling;
     private boolean loaded, filling, dirty, wide, forceDark;
     private volatile boolean saving;
@@ -171,6 +172,10 @@ public final class SettingsPanel {
                 toggleRow(engLinkSteer, "핸들도 스포츠로", "엔진이 스포츠가 될 때", 15),
         });
 
+        clusterOn = new Toggle();
+        clusterTheme = new Choice(new String[] {"테마 A", "테마 B", "테마 C", "테마 D"});
+        clusterCard = buildClusterCard();
+
         Runnable exclusive = new Runnable() {
             @Override public void run() { applyExclusive(); }
         };
@@ -214,6 +219,7 @@ public final class SettingsPanel {
         root.addView(master);
         root.addView(seg);
         for (int k = 0; k < 3; k++) root.addView(tabs[k]);
+        root.addView(clusterCard);
         root.addView(saveButton, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)));
         message.setGravity(Gravity.CENTER_HORIZONTAL);
         root.addView(message);
@@ -243,6 +249,7 @@ public final class SettingsPanel {
         LinearLayout holder = new LinearLayout(activity);
         holder.setOrientation(LinearLayout.VERTICAL);
         for (int k = 0; k < 3; k++) holder.addView(tabs[k]);
+        holder.addView(clusterCard);
         area.addView(scroll(holder, false), new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1));
         // The link cards scroll in the space left over; the save card is pinned to the bottom with a fixed
         // height, so a longer message can never push the buttons off the screen (seen on the car, 0.4.0).
@@ -282,12 +289,12 @@ public final class SettingsPanel {
         LinearLayout seg = new LinearLayout(activity);
         seg.setPadding(dp(4), dp(4), dp(4), dp(4));
         seg.setBackgroundDrawable(round(c.line, dp(12)));
-        String[] names = {"메인", "서스펜션", "핸들", "엔진", "도구"};
-        for (int p = 0; p < 5; p++) {
+        String[] names = {"메인", "서스펜션", "핸들", "엔진", "클러스터", "도구"};
+        for (int p = 0; p < 6; p++) {
             final int which = p;
             TextView b = text(names[p], 16, c.muted, MEDIUM);
             b.setGravity(Gravity.CENTER);
-            b.setPadding(dp(20), 0, dp(20), 0);
+            b.setPadding(dp(14), 0, dp(14), 0);
             b.setOnClickListener(new View.OnClickListener() {
                 @Override public void onClick(View v) { showPage(which); }
             });
@@ -626,6 +633,22 @@ public final class SettingsPanel {
         return seg;
     }
 
+    private LinearLayout buildClusterCard() {
+        LinearLayout card = card();
+        card.addView(sectionLabel("클러스터"));
+        card.addView(toggleRow(clusterOn, "스포츠일 때 클러스터 테마 바꾸기",
+                "스포츠 모드이거나 마이 드라이브에서 엔진·서스펜션·핸들 중 하나라도 스포츠면 고른 테마로 바꾸고, 끝나면 원래 테마로 돌려놓아요.", 15));
+        card.addView(divider());
+        card.addView(choiceRow(clusterTheme, "스포츠 테마", null));
+        TextView note = text("순정 '드라이브 모드 연동'이 켜져 있으면 차가 테마를 따로 바꿀 수 있어요.", 12, c.muted, null);
+        note.setLineSpacing(0, 1.15f);
+        card.addView(note);
+        clusterStatus = text("", 12, c.muted, null);
+        clusterStatus.setVisibility(View.GONE);
+        card.addView(clusterStatus);
+        return card;
+    }
+
     private View tools() {
         LinearLayout card = card();
         card.addView(sectionLabel("도구"));
@@ -730,7 +753,10 @@ public final class SettingsPanel {
                 // Older car modules (0.4.0 and before) reject unknown keys: send it only when they know it or it is on.
                 + (carKnowsEngNormal || engNormal.on ? " engNormal=" + engNormal.bit() : "")
                 + " suspLinkEng=" + suspLinkEng.bit() + " suspLinkSteer=" + suspLinkSteer.bit()
-                + " engLinkSusp=" + engLinkSusp.bit() + " engLinkSteer=" + engLinkSteer.bit();
+                + " engLinkSusp=" + engLinkSusp.bit() + " engLinkSteer=" + engLinkSteer.bit()
+                // Older car modules (0.4.3 and before) reject unknown keys: send them only when known or changed.
+                + (carKnowsCluster || clusterOn.on || clusterTheme.value != 1
+                        ? " clusterOn=" + clusterOn.bit() + " clusterTheme=" + clusterTheme.value : "");
         saveButton.setText("저장 중…");
         if (topSave != null) topSave.setText("저장 중…");
         saving = true;
@@ -809,6 +835,8 @@ public final class SettingsPanel {
         if (reply.contains("engPedal")) return "엑셀 기준은 5~100% 입니다.";
         if (reply.contains("engHold")) return "엔진 유지 시간은 1~60초입니다.";
         if (reply.contains("unknown key: engNormal")) return "노멀 선택은 차량 모듈 0.4.1부터 됩니다. 차량 쪽을 먼저 올려 주세요.";
+        if (reply.contains("unknown key: cluster")) return "클러스터 테마는 차량 모듈 0.4.5부터 됩니다. 차량 쪽을 먼저 올려 주세요.";
+        if (reply.contains("clusterTheme")) return "클러스터 테마는 A~D 중에서 골라야 합니다.";
         if (reply.contains("speedHysteresis")) return "여유는 3 이상이어야 합니다.";
         return reply;
     }
@@ -825,6 +853,10 @@ public final class SettingsPanel {
         suspLinkSteer.set("1".equals(m.get("suspLinkSteer")));
         engLinkSusp.set("1".equals(m.get("engLinkSusp")));
         engLinkSteer.set("1".equals(m.get("engLinkSteer")));
+        carKnowsCluster = m.containsKey("clusterOn");
+        clusterOn.set("1".equals(m.get("clusterOn")));
+        int ct = parse(m.get("clusterTheme"));
+        clusterTheme.set(ct >= 1 && ct <= 4 ? ct : 1);
         speedUp.set(parse(m.get("speedUp")));
         hyst.set(parse(m.get("hyst")));
         cornerOn.set(parse(m.get("cornerOn")) / 10);
@@ -929,9 +961,47 @@ public final class SettingsPanel {
         String last = String.valueOf(m.get("last")).replace('_', ' ').replace("speed ", "속도 ")
                 .replace("corner ", "코너 ").replace("pedal ", "엑셀 ").replace("link ", "연동 ")
                 .replace("stopped", "정차");
+        String cl = describeCluster(m);
+        if (clusterStatus != null) {
+            clusterStatus.setText(cl);
+            clusterStatus.setVisibility(cl.length() > 0 ? View.VISIBLE : View.GONE);
+        }
         footer.setText("전환 " + m.get("sent") + "회" + ("-".equals(last) || "null".equals(last) ? "" : " · 마지막 " + last)
                 + " · 센서 보정 " + calib + ("ok".equals(m.get("imu")) ? "" : " · 센서 " + m.get("imu"))
+                + (cl.length() > 0 ? " · " + cl : "")
                 + (m.get("profile") != null ? " · 차종 프로필 " + m.get("profile") : ""));
+    }
+
+    static String describeCluster(Map<String, String> m) {
+        String st = m.get("cluster");
+        String th = themeLetter(m.get("clusterTheme"));
+        if (st == null && th == null) return "";
+        String state;
+        if ("off".equals(st)) {
+            state = "꺼짐";
+        } else if ("waiting".equals(st)) {
+            state = "대기";
+        } else if ("halted".equals(st)) {
+            state = "멈춤(응답 없음)";
+        } else if (st != null && st.startsWith("sport_")) {
+            int orig = st.indexOf("_orig_");
+            if (orig > 6 && orig + 6 < st.length()) {
+                state = "스포츠 테마 " + st.substring(6, orig) + " (원래 " + st.substring(orig + 6) + ")";
+            } else {
+                state = st;
+            }
+        } else {
+            state = st != null ? st : "–";
+        }
+        return "클러스터: " + state + (th != null ? " · 현재 테마 " + th : "");
+    }
+
+    static String themeLetter(String v) {
+        if ("1".equals(v)) return "A";
+        if ("2".equals(v)) return "B";
+        if ("3".equals(v)) return "C";
+        if ("4".equals(v)) return "D";
+        return null;
     }
 
     /** The pill under the speed (driving state) and one line saying why. */
@@ -1014,18 +1084,19 @@ public final class SettingsPanel {
     }
 
     private void showPage(int p) {
-        for (int i = 0; i < 5; i++) {
+        for (int i = 0; i < 6; i++) {
             boolean sel = i == p;
             pageButtons[i].setTextColor(sel ? c.fg : c.muted);
             pageButtons[i].setBackgroundDrawable(sel ? round(c.surface, dp(9)) : null);
         }
         mainPage.setVisibility(p == 0 ? View.VISIBLE : View.GONE);
-        settingsArea.setVisibility(p >= 1 && p <= 3 ? View.VISIBLE : View.GONE);
-        toolsPage.setVisibility(p == 4 ? View.VISIBLE : View.GONE);
+        settingsArea.setVisibility(p >= 1 && p <= 4 ? View.VISIBLE : View.GONE);
+        toolsPage.setVisibility(p == 5 ? View.VISIBLE : View.GONE);
         for (int k = 0; k < 3; k++) {
             tabs[k].setVisibility(k == p - 1 ? View.VISIBLE : View.GONE);
             linkCards[k].setVisibility(k == p - 1 ? View.VISIBLE : View.GONE);
         }
+        if (clusterCard != null) clusterCard.setVisibility(p == 4 ? View.VISIBLE : View.GONE);
     }
 
     private void showTab(int which) {
@@ -1147,6 +1218,16 @@ public final class SettingsPanel {
         return row;
     }
 
+    private View choiceRow(Choice ch, String title, String hint) {
+        LinearLayout col = column(dp(6));
+        LinearLayout labels = column(dp(2));
+        labels.addView(text(title, 15, c.fg, MEDIUM));
+        if (hint != null) labels.addView(text(hint, 12, c.muted, null));
+        col.addView(labels);
+        col.addView(ch.view, new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
+        return col;
+    }
+
     private View stepRow(Stepper s, String title, String hint) {
         LinearLayout col = column(dp(6));
         LinearLayout head = new LinearLayout(activity);
@@ -1264,6 +1345,47 @@ public final class SettingsPanel {
             float rad = h / 2 - dp(3);
             paint.setColor(on ? c.onAccent : c.muted);
             canvas.drawCircle(on ? w - h / 2 : h / 2, h / 2, rad, paint);
+        }
+    }
+
+    /** Segmented choice control (values 1..N) in the same style as the tab bar. */
+    private final class Choice {
+        int value = 1;
+        final LinearLayout view;
+        private final TextView[] buttons;
+
+        Choice(String[] labels) {
+            view = new LinearLayout(activity);
+            view.setPadding(dp(4), dp(4), dp(4), dp(4));
+            view.setBackgroundDrawable(round(c.surface2, dp(12)));
+            buttons = new TextView[labels.length];
+            for (int i = 0; i < labels.length; i++) {
+                final int v = i + 1;
+                TextView b = text(labels[i], 14, c.muted, MEDIUM);
+                b.setGravity(Gravity.CENTER);
+                b.setOnClickListener(new View.OnClickListener() {
+                    @Override public void onClick(View vw) {
+                        if (value != v) {
+                            set(v);
+                            changed();
+                        }
+                    }
+                });
+                buttons[i] = b;
+                view.addView(b, new LinearLayout.LayoutParams(0, dp(40), 1));
+            }
+            set(1);
+        }
+
+        void set(int v) {
+            if (v < 1 || v > buttons.length) v = 1;
+            value = v;
+            for (int i = 0; i < buttons.length; i++) {
+                boolean sel = (i + 1) == value;
+                buttons[i].setTextColor(sel ? c.fg : c.muted);
+                buttons[i].setTypeface(sel ? BOLD : MEDIUM);
+                buttons[i].setBackgroundDrawable(sel ? round(c.surface, dp(9)) : null);
+            }
         }
     }
 

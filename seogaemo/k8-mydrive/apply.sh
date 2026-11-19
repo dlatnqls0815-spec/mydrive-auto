@@ -25,5 +25,7 @@ set_prop persist.sys.k8ecs.enghold {setting:e_hd}
 set_prop persist.sys.k8ecs.lnk_es {setting:e_sus}
 set_prop persist.sys.k8ecs.lnk_eh {setting:e_str}
 set_prop persist.sys.k8ecs.maxpm {setting:mx}
+set_prop persist.sys.k8ecs.cl_on {setting:c_on}
+set_prop persist.sys.k8ecs.cl_th {setting:c_th}
 set_prop persist.sys.k8ecs.mydrive 1
 fi

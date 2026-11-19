@@ -24,6 +24,9 @@ public final class CarLog {
     private static final String IGNITION = "SYS_IGN_STATUS_M:";
     private static final String REVERSE = "Reverse status changed to :";
     private static final Pattern HEADING = Pattern.compile("gis\\.extra\\.HEADING=(\\d+)");
+    private static final Pattern CLUSTER_THEME_USM = Pattern.compile("\\bCluster_ThemeStatusNew\\s*:\\s*(\\d+)");
+    private static final Pattern CLUSTER_THEME_SETTING = Pattern.compile(
+            "onClusterETCStatusReceived\\b.*\\bnThemeStatusNew\\s*:\\s*(\\d+)");
 
     /** Drive mode byte (byte 2) of a drive mode report; 0 (in transition) and 0x0f (boot) return -1. */
     public static int driveMode(String line) {
@@ -120,5 +123,24 @@ public final class CarLog {
         if (mode < 0) return false;
         if (mode == MODE_SMART) return slot != SLOT_SMART;
         return !isStockMode(mode);
+    }
+
+    /**
+     * Instrument cluster theme raw value (1..4) from USMService or ThemeSettingService logcat lines,
+     * or -1 when the line is not a cluster theme status line or the value is out of range.
+     */
+    public static int clusterTheme(String line) {
+        if (line == null) return -1;
+        Matcher m = CLUSTER_THEME_USM.matcher(line);
+        if (!m.find()) {
+            m = CLUSTER_THEME_SETTING.matcher(line);
+            if (!m.find()) return -1;
+        }
+        try {
+            int v = Integer.parseInt(m.group(1));
+            return ClusterThemeController.isValidTheme(v) ? v : -1;
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 }

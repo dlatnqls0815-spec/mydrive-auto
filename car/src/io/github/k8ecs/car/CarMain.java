@@ -10,6 +10,7 @@ import android.os.ParcelFileDescriptor;
 
 import io.github.k8ecs.core.AccelLateral;
 import io.github.k8ecs.core.CarLog;
+import io.github.k8ecs.core.ClusterThemeController;
 import io.github.k8ecs.core.DampingController;
 import io.github.k8ecs.core.GyroCalibrator;
 import io.github.k8ecs.core.PedalController;
@@ -46,7 +47,7 @@ import java.util.UUID;
  * moving forward. Settings over 127.0.0.1 TCP (head unit app) and Bluetooth RFCOMM (phone).
  */
 public final class CarMain {
-    static final String VERSION = "0.4.3";
+    static final String VERSION = "0.4.5";
     /** BCM getSpeed_KMHUnit() returns the display speed raw value in 0.5 km/h steps (65 = 32.5 km/h on the cluster). */
     static final float BCM_SPEED_RAW_PER_KMH = 2f;
     static final String LOG_DIR = "/data/nemesis/logs/k8ecs.damping";
@@ -66,6 +67,7 @@ public final class CarMain {
     private DampingController controller;       // suspension
     private DampingController steerController;  // steering
     private PedalController pedalController;    // powertrain
+    private ClusterThemeController clusterController; // instrument cluster sport theme
     /** Car model profile from ro.build.product (core/VehicleProfile; add new cars there). */
     private final String product = systemProp("ro.build.product");
     private final VehicleProfile profile = VehicleProfile.forProduct(product);
@@ -90,6 +92,12 @@ public final class CarMain {
     private int slot = -1;          // fourth mode slot: 1 My Drive, 2 Smart, -1 unknown (kept in state.txt)
     private int lastLoggedMode = -1;
     private int savedMode = -1;     // last drive mode from state.txt
+    private int savedClusterOrig = -1; // original cluster theme from state.txt
+    private int clusterTheme = -1;  // current cluster theme raw value (1..4), -1 unknown
+    private int clusterAutoSet = -1; // stock drive-mode-link cluster theme status (read-only), -1 unknown
+    private boolean ignitionOn = true; // set false on SYS_IGN_STATUS_M: 0, true on : 1 or kmh > 0
+    private String usmServiceName;  // discovered IUSMService name (logged once)
+    private boolean usmMissingLogged;
     volatile SeogaemoBridge seogaemo;
     private boolean reverse;
     private int lateralMilliG;
@@ -180,6 +188,57 @@ public final class CarMain {
         } catch (Exception e) {
             Log.i("item state at start unknown: " + e);
         }
+        try {
+            Binder.ServiceRef usm = Binder.findUsm(null);
+            if (usm == null) {
+                logUsmMissingOnce();
+            } else {
+                logUsmFoundOnce(usm.name);
+                try {
+                    int t = Binder.getClusterTheme(usm.binder);
+                    if (ClusterThemeController.isValidTheme(t)) {
+                        synchronized (lock) { clusterTheme = t; }
+                        Log.i("cluster theme at start: " + t + " (" + ClusterThemeController.themeLetter(t) + ")");
+                    } else {
+                        Log.i("cluster theme at start: raw " + t);
+                    }
+                } catch (Exception e) {
+                    Log.i("cluster theme at start unknown: " + e);
+                }
+                try {
+                    int autoSet = Binder.getClusterAutoSet(usm.binder);
+                    synchronized (lock) { clusterAutoSet = autoSet; }
+                    Log.i("cluster autoSet at start: " + autoSet);
+                } catch (Exception e) {
+                    Log.i("cluster autoSet at start unknown: " + e);
+                }
+            }
+        } catch (Exception e) {
+            Log.i("usm at start failed: " + e);
+        }
+    }
+
+    void logUsmFoundOnce(String name) {
+        boolean log = false;
+        synchronized (lock) {
+            if (name != null && !name.equals(usmServiceName)) {
+                usmServiceName = name;
+                usmMissingLogged = false;
+                log = true;
+            }
+        }
+        if (log) Log.i("usm service: " + name);
+    }
+
+    void logUsmMissingOnce() {
+        boolean log = false;
+        synchronized (lock) {
+            if (!usmMissingLogged) {
+                usmMissingLogged = true;
+                log = true;
+            }
+        }
+        if (log) Log.i("usm service not found; cluster theme idle");
     }
 
     // ---------- settings and learned state ----------
@@ -221,6 +280,12 @@ public final class CarMain {
                 if (tok.startsWith("accelAxes02=")) {
                     try { savedAccelAngle = Double.parseDouble(tok.substring(12)); } catch (NumberFormatException ignored) { }
                 }
+                if (tok.startsWith("clusterOrig=")) {
+                    try {
+                        int v = Integer.parseInt(tok.substring(12));
+                        if (ClusterThemeController.isValidTheme(v)) savedClusterOrig = v;
+                    } catch (NumberFormatException ignored) { }
+                }
             }
         }
         synchronized (lock) {
@@ -232,6 +297,8 @@ public final class CarMain {
         }
         if (saved != 0) Log.i("gyro scale restored " + saved);
         if (!Double.isNaN(savedAccelAngle)) Log.i("accel direction restored " + savedAccelAngle);
+        if (savedClusterOrig > 0) Log.i("cluster original theme restored " + savedClusterOrig
+                + " (" + ClusterThemeController.themeLetter(savedClusterOrig) + ")");
     }
 
     String apply(String pairs) {
@@ -273,6 +340,37 @@ public final class CarMain {
             c.clearHalt();
             if (c.carStep == 0 || c.carStep == 1) deciderLevel(c, c.carStep);
         }
+        if (clusterController == null) {
+            clusterController = new ClusterThemeController(ClusterThemeController.DEFAULT_RELEASE_MS, savedClusterOrig);
+        } else if (clusterController.isHalted()) {
+            clusterController.clearHalt();
+        }
+    }
+
+    boolean clusterOnLocked() {
+        return settings.enabled && settings.clusterOn;
+    }
+
+    /** Stock Sport mode (0x03), or My Drive with at least one item confirmed in its sport step by car feedback. */
+    boolean isSportActiveLocked() {
+        if (mode == CarLog.MODE_SPORT) return true;
+        if (CarLog.isMyDrive(mode, slot)) {
+            for (Channel c : channels()) {
+                if (c.supported && c.lastFb >= 0 && c.lastFb == c.fbFor(1)) return true;
+            }
+        }
+        return false;
+    }
+
+    String clusterStateLocked() {
+        if (clusterController != null && clusterController.isHalted()) return "halted";
+        if (clusterController != null && clusterController.savedOriginal() != -1) {
+            int t = clusterController.appliedTarget() != -1 ? clusterController.appliedTarget() : settings.clusterTheme;
+            return "sport_" + ClusterThemeController.themeLetter(t)
+                    + "_orig_" + ClusterThemeController.themeLetter(clusterController.savedOriginal());
+        }
+        if (!clusterOnLocked()) return "off";
+        return "waiting";
     }
 
     void deciderLevel(Channel c, int step) {
@@ -381,6 +479,8 @@ public final class CarMain {
         if (accel.oriented()) b.append("accelAxes02=").append(accel.angle()).append(' ');
         if (slot > 0) b.append("myDriveSlot=").append(slot).append(' ');
         if (mode > 0) b.append("driveMode=").append(mode).append(' ');
+        int clusterOrig = clusterController != null ? clusterController.savedOriginal() : savedClusterOrig;
+        if (ClusterThemeController.isValidTheme(clusterOrig)) b.append("clusterOrig=").append(clusterOrig).append(' ');
         StringBuilder fm = new StringBuilder();
         for (Channel c : channels())
             for (Map.Entry<String, Integer> e : c.learned.entrySet())
@@ -400,7 +500,7 @@ public final class CarMain {
             Process p = null;
             try {
                 p = new ProcessBuilder("logcat", "-b", "main", "-b", "system", "-v", "time", "-s",
-                        "SystemService:V", "GisUtil:D").redirectErrorStream(true).start();
+                        "SystemService:V", "GisUtil:D", "USMService:V", "ThemeSettingService:D").redirectErrorStream(true).start();
                 BufferedReader r = new BufferedReader(new InputStreamReader(p.getInputStream(), "UTF-8"));
                 String line;
                 while ((line = r.readLine()) != null) handleLine(line);
@@ -447,13 +547,25 @@ public final class CarMain {
         Boolean ign = CarLog.ignition(line);
         if (ign != null) {
             synchronized (lock) {
-                if (!ign.booleanValue()) {
+                ignitionOn = ign.booleanValue();
+                if (!ignitionOn) {
                     // Ignition off: the car comes back in ECO next time.
                     mode = CarLog.MODE_ECO;
+                    if (clusterController != null) clusterController.onIgnitionOff();
                     Log.i("ignition off, next start eco");
                     saveStateLocked();
                 }
                 peakMilliG = 0;
+            }
+            return;
+        }
+        int ct = CarLog.clusterTheme(line);
+        if (ct > 0) {
+            synchronized (lock) {
+                if (ct != clusterTheme) {
+                    clusterTheme = ct;
+                    Log.i("cluster theme " + ct + " (" + ClusterThemeController.themeLetter(ct) + ")");
+                }
             }
             return;
         }
@@ -526,8 +638,9 @@ public final class CarMain {
     // ---------- control loop ----------
 
     void control() {
-        IBinder bcm = null, sys = null, hscan = null;
-        long lastSummary = 0, lastPedalTry = 0;
+        IBinder bcm = null, sys = null, hscan = null, usm = null;
+        long lastSummary = 0, lastPedalTry = 0, lastUsmFind = 0, lastUsmPoll = 0;
+        boolean usmReadErrLogged = false;
         while (true) {
             sleep(100);
             long now = System.currentTimeMillis();
@@ -546,14 +659,72 @@ public final class CarMain {
                         synchronized (lock) { if (!pedalState.startsWith("error")) Log.i("pedal read failed: " + e); pedalState = "error"; }
                     }
                 }
+                // Instrument cluster theme (read-only getter every 2 s while feature is on or restoring).
+                boolean wantUsm;
+                String knownUsmName;
+                boolean needAutoSet;
+                synchronized (lock) {
+                    if (Math.round(v) > 0) ignitionOn = true;
+                    boolean cActive = clusterController != null && !clusterController.isHalted()
+                            && (clusterOnLocked() || clusterController.savedOriginal() != -1 || clusterController.hasPending());
+                    wantUsm = cActive && ignitionOn;
+                    knownUsmName = usmServiceName;
+                    needAutoSet = clusterAutoSet < 0;
+                }
+                if (wantUsm) {
+                    if (usm == null && now - lastUsmFind >= 10000) {
+                        lastUsmFind = now;
+                        try {
+                            Binder.ServiceRef ref = Binder.findUsm(knownUsmName);
+                            if (ref != null) {
+                                usm = ref.binder;
+                                usmReadErrLogged = false;
+                                logUsmFoundOnce(ref.name);
+                            } else {
+                                logUsmMissingOnce();
+                            }
+                        } catch (Exception e) {
+                            logUsmMissingOnce();
+                        }
+                    }
+                    if (usm != null && now - lastUsmPoll >= 2000) {
+                        lastUsmPoll = now;
+                        try {
+                            int t = Binder.getClusterTheme(usm);
+                            usmReadErrLogged = false;
+                            if (ClusterThemeController.isValidTheme(t)) {
+                                synchronized (lock) {
+                                    if (t != clusterTheme) {
+                                        clusterTheme = t;
+                                        Log.i("cluster theme " + t + " (" + ClusterThemeController.themeLetter(t) + ")");
+                                    }
+                                }
+                            }
+                            if (needAutoSet) {
+                                int autoSet = Binder.getClusterAutoSet(usm);
+                                synchronized (lock) { clusterAutoSet = autoSet; }
+                                Log.i("cluster autoSet: " + autoSet);
+                            }
+                        } catch (Exception e) {
+                            usm = null;
+                            if (!usmReadErrLogged) {
+                                usmReadErrLogged = true;
+                                Log.i("cluster theme read failed: " + e);
+                            }
+                        }
+                    }
+                }
                 Channel[] sendCh = new Channel[3];
                 int[] sendStep = new int[3];
                 String[] sendWhy = new String[3];
                 int n = 0;
+                int clusterCmd = ClusterThemeController.NO_COMMAND;
+                String clusterWhy = null;
                 synchronized (lock) {
                     kmh = Math.round(v);
                     kmhExact = v;
                     kmhAtMs = now;
+                    if (kmh > 0) ignitionOn = true;
                     if (!Float.isNaN(pedal)) { pedalPct = pedal; pedalAtMs = now; pedalState = "ok"; }
                     for (Channel c : channels()) {
                         if (c.pendingStep >= 0 && now - c.pendingSinceMs > 2000) {
@@ -599,6 +770,27 @@ public final class CarMain {
                         c.sent++;
                         c.lastReason = sendWhy[i];
                     }
+                    if (usm != null && ignitionOn && clusterController != null) {
+                        int prevMisses = clusterController.misses();
+                        boolean prevHalted = clusterController.isHalted();
+                        int prevOrig = clusterController.savedOriginal();
+                        clusterCmd = clusterController.update(now, clusterOnLocked(), settings.clusterTheme,
+                                isSportActiveLocked(), clusterTheme);
+                        if (clusterController.misses() > prevMisses) {
+                            Log.i("no feedback for cluster theme " + clusterController.lastMissedTheme()
+                                    + " (" + clusterController.misses() + ")");
+                        }
+                        if (!prevHalted && clusterController.isHalted()) {
+                            Log.i("HALT cluster: no feedback twice");
+                        }
+                        if (clusterController.savedOriginal() != prevOrig) {
+                            savedClusterOrig = clusterController.savedOriginal();
+                            saveStateLocked();
+                        }
+                        if (clusterCmd != ClusterThemeController.NO_COMMAND) {
+                            clusterWhy = clusterController.lastReason();
+                        }
+                    }
                     if (now - lastSummary > 10000 && kmh > 0) {
                         lastSummary = now;
                         Log.i("drive " + statusLocked());
@@ -608,6 +800,15 @@ public final class CarMain {
                     Channel c = sendCh[i];
                     Binder.setItem(sys, c.item, sendStep[i] == 1 ? c.value1 : c.value0);
                     Log.i("SEND " + c.name + " " + c.stepName(sendStep[i]) + " (" + sendWhy[i] + ")");
+                }
+                if (clusterCmd != ClusterThemeController.NO_COMMAND && usm != null) {
+                    try {
+                        Binder.setClusterTheme(usm, clusterCmd);
+                        Log.i("CLUSTER theme " + clusterCmd + " (" + clusterWhy + ")");
+                    } catch (Exception e) {
+                        usm = null;
+                        Log.i("cluster theme send failed: " + e);
+                    }
                 }
             } catch (Exception e) {
                 Log.i("control error " + e);
@@ -639,6 +840,9 @@ public final class CarMain {
                 + " last=" + last.replace(' ', '_')
                 + " halted=" + (susp.halted || steer.halted || eng.halted ? 1 : 0)
                 + " haltedItems=" + (susp.halted ? "S" : "") + (steer.halted ? "H" : "") + (eng.halted ? "E" : "") + "-"
+                + " cluster=" + clusterStateLocked()
+                + " clusterTheme=" + (ClusterThemeController.isValidTheme(clusterTheme) ? Integer.toString(clusterTheme) : "?")
+                + " clusterAutoSet=" + (clusterAutoSet >= 0 ? Integer.toString(clusterAutoSet) : "?")
                 + " imu=" + imuState.replace(' ', '_')
                 + " frames=" + imuFrames + " gyroScale=" + scale + " turns=" + gyro.segmentCount()
                 + " bias=" + (Double.isNaN(gyro.bias()) ? "?" : String.format(Locale.US, "%.1f", gyro.bias()))
@@ -899,6 +1103,90 @@ public final class CarMain {
                 d.writeInt(value);
                 sys.transact(0x30, d, r, 0);
                 r.readException();
+            } finally { d.recycle(); r.recycle(); }
+        }
+
+        static final String USM_DESCRIPTOR = "com.hkmc.usm.IUSMService";
+        static final String[] USM_CANDIDATES = {"com.hkmc.micom.usm", "com.hkmc.usm", "usm"};
+
+        static final class ServiceRef {
+            final String name;
+            final IBinder binder;
+            ServiceRef(String name, IBinder binder) { this.name = name; this.binder = binder; }
+        }
+
+        /**
+         * Finds IUSMService by trying known candidate names and checking getInterfaceDescriptor(),
+         * falling back to scanning ServiceManager.listServices() for names containing "usm".
+         * Returns null when not found (never throws).
+         */
+        static ServiceRef findUsm(String preferredName) {
+            try {
+                Class<?> sm = Class.forName("android.os.ServiceManager");
+                Method getService = sm.getMethod("getService", String.class);
+                if (preferredName != null && preferredName.length() > 0) {
+                    IBinder b = checkUsm(getService, preferredName);
+                    if (b != null) return new ServiceRef(preferredName, b);
+                }
+                for (String name : USM_CANDIDATES) {
+                    if (name.equals(preferredName)) continue;
+                    IBinder b = checkUsm(getService, name);
+                    if (b != null) return new ServiceRef(name, b);
+                }
+                Method listServices = sm.getMethod("listServices");
+                String[] all = (String[]) listServices.invoke(null);
+                if (all != null) {
+                    for (String name : all) {
+                        if (name == null || !name.toLowerCase(Locale.US).contains("usm")) continue;
+                        IBinder b = checkUsm(getService, name);
+                        if (b != null) return new ServiceRef(name, b);
+                    }
+                }
+            } catch (Exception ignored) { }
+            return null;
+        }
+
+        private static IBinder checkUsm(Method getService, String name) {
+            try {
+                IBinder b = (IBinder) getService.invoke(null, name);
+                if (b != null && USM_DESCRIPTOR.equals(b.getInterfaceDescriptor())) return b;
+            } catch (Exception ignored) { }
+            return null;
+        }
+
+        /** IUSMService.getCluster_ThemeStatusNew(), transaction 0x22b (read-only). */
+        static int getClusterTheme(IBinder usm) throws Exception {
+            Parcel d = Parcel.obtain(), r = Parcel.obtain();
+            try {
+                d.writeInterfaceToken(USM_DESCRIPTOR);
+                usm.transact(0x22b, d, r, 0);
+                r.readException();
+                return r.readInt();
+            } finally { d.recycle(); r.recycle(); }
+        }
+
+        /** IUSMService.setCluster_ThemeStatusNew(int), transaction 0xc4. Allows only values 1..4. */
+        static void setClusterTheme(IBinder usm, int value) throws Exception {
+            if (value < ClusterThemeController.MIN_THEME || value > ClusterThemeController.MAX_THEME) {
+                throw new IllegalArgumentException("clusterTheme " + value);
+            }
+            Parcel d = Parcel.obtain(), r = Parcel.obtain();
+            try {
+                d.writeInterfaceToken(USM_DESCRIPTOR);
+                d.writeInt(value);
+                usm.transact(0xc4, d, r, 0);
+                r.readException();
+            } finally { d.recycle(); r.recycle(); }
+        }
+
+        /** IUSMService.getCluster_ThemeAutoSetStatus(), transaction 0x1ac (read-only; never set). */
+        static int getClusterAutoSet(IBinder usm) throws Exception {
+            Parcel d = Parcel.obtain(), r = Parcel.obtain();
+            try {
+                d.writeInterfaceToken(USM_DESCRIPTOR);
+                usm.transact(0x1ac, d, r, 0);
+                r.readException();
+                return r.readInt();
             } finally { d.recycle(); r.recycle(); }
         }
     }
