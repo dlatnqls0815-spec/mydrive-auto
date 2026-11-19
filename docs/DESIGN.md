@@ -216,7 +216,7 @@ K8 커스텀 화면 항목: 파워트레인(ECO/SPORT), 스티어링(NORMAL/SPOR
 ## 앰비언트 스포츠 빨강 (2026-11-20, 실차 미확인)
 
 - 호출(`ISystemService`, 인터페이스 `com.hkmc.micom.ISystemService`, 기존 `com.hkmc.micom.system` 바인더):
-  - 색 설정: `setSMLRGB(byte[] red, byte[] green, byte[] blue)`, 트랜잭션 `0x4e`. 각 배열은 2바이트 `{hi, lo}` (`hi=0x00` 직접 RGB `lo=0..255`, `hi=0x01` 순정 테마 코드; 그 외 거부). 스포츠 빨강 목표는 `{0x00, 0xff}, {0x00, 0x00}, {0x00, 0x00}`.
+  - 색 설정: `setSMLRGB(byte[] red, byte[] green, byte[] blue)`, 트랜잭션 `0x4e`. 각 배열은 2바이트 `{hi, lo}` (`hi=0x00` 직접 RGB `lo=0..255`, `hi=0x01` 순정 테마 코드). 0.4.8 스포츠 빨강 목표는 K8 순정 색상 선택과 응답에서 관측된 `00fa00040051`이다.
   - 상태 조회: `requestSMLStatus()`, 트랜잭션 `0x4c` (인자 없음, 읽기 전용 효과). 시작 시 및 기능 켤 때 1회 호출.
 - 로그캣 수신(`SystemService` 태그, 이미 필터에 포함):
   - `SYS_SML_STATUS_M_RESP:` 뒤 9바이트 이상 (`[MicomEventHandler.handleMessage]` 접두 형식 포함).
@@ -224,7 +224,7 @@ K8 커스텀 화면 항목: 파워트레인(ECO/SPORT), 스티어링(NORMAL/SPOR
   - `[SystemService.setSMLRGB]` 명령 줄은 무시한다.
 - 동작 규칙(`AmbientSportController`, 공통 `SportOverrideController` 사용):
   - 클러스터와 같은 스포츠 상태(`isSportActiveLocked()`), 기본값 꺼짐(`ambOn=0`). 사제 조명은 순정 앰비언트 상태를 따라가므로 별도 제어 없음.
-  - 스포츠가 끝나면 **즉시** 원래 색으로 복귀한다(송신 간 최소 간격 3초 유지). 옵션을 끄면 바로 복원한다.
+  - 스포츠가 끝나면 설정된 0~5초가 지나고 송신 간 최소 3초가 충족되는 시점에 원래 색으로 돌아간다. 복귀 대기 기본값은 0초다. 옵션을 끌 때는 최소 송신 간격만 적용된다.
   - 앰비언트가 꺼져 있거나(`brightness == 1`) 현재 상태를 모르면 보내지 않는다(모름은 로그 1회 `ambient status unknown`).
   - 운전자가 직접 색을 바꾸면 덮어쓰지 않고 취소한다. 응답이 3초 안에 안 맞으면 1회 재시도, **2회 실패** 시 앰비언트 기능만 멈춘다(`halted`).
   - 앰비언트와 클러스터는 복귀 응답을 확인할 때까지 원래 값을 보관한다. 복귀 명령도 3초 뒤 1회 재시도하며, 대기 중 운전자가 다른 값을 고르면 복귀를 취소한다.

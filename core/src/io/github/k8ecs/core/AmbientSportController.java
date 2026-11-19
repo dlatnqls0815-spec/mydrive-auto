@@ -12,8 +12,9 @@ public final class AmbientSportController {
     public static final long NO_COMMAND = SportOverrideController.NO_VALUE;
     /** Value when the current ambient color is unknown or invalid. */
     public static final long UNKNOWN_COLOR = SportOverrideController.NO_VALUE;
-    /** Target sport color: direct red {0x00, 0xff}, {0x00, 0x00}, {0x00, 0x00}. */
-    public static final long RED = 0x00ff00000000L;
+    /** Direct red observed in the K8 factory color selector and matching SML response. */
+    public static final long RED = 0x00fa00040051L;
+    private static final long PREVIOUS_RED = 0x00ff00000000L;
 
     public static final long DEFAULT_RELEASE_MS = SportOverrideController.DEFAULT_RELEASE_MS;
     public static final long PENDING_TIMEOUT_MS = SportOverrideController.PENDING_TIMEOUT_MS;
@@ -26,6 +27,7 @@ public final class AmbientSportController {
     public static final String REASON_RESTORE_RESTART = SportOverrideController.REASON_RESTORE_RESTART;
 
     private final SportOverrideController core;
+    private boolean acceptPreviousRedOnStartup;
 
     public AmbientSportController() {
         this(DEFAULT_RELEASE_MS, UNKNOWN_COLOR);
@@ -42,6 +44,7 @@ public final class AmbientSportController {
     public AmbientSportController(long releaseMs, long persistedOriginal) {
         this.core = new SportOverrideController(releaseMs,
                 isValidColor(persistedOriginal) ? persistedOriginal : SportOverrideController.NO_VALUE);
+        acceptPreviousRedOnStartup = isValidColor(persistedOriginal) && persistedOriginal != PREVIOUS_RED;
     }
 
     /** True when the 48-bit packed color has valid channel hi bytes (0x00 direct or 0x01 factory theme). */
@@ -107,6 +110,7 @@ public final class AmbientSportController {
 
     public void clearHalt() { core.clearHalt(); }
     public void onIgnitionOff() { core.onIgnitionOff(); }
+    public void setReleaseMs(long releaseMs) { core.setReleaseMs(releaseMs); }
 
     /**
      * Evaluates one tick with the ignition on. Does nothing when ambient light is switched off
@@ -121,7 +125,13 @@ public final class AmbientSportController {
      */
     public long update(long nowMs, boolean enabled, boolean sportActive, long currentColor, int brightnessRaw) {
         if (brightnessRaw == CarLog.SML_BRIGHTNESS_OFF) return NO_COMMAND;
-        long cur = (brightnessRaw >= 2 && isValidColor(currentColor)) ? currentColor : SportOverrideController.NO_VALUE;
+        long cur = (brightnessRaw >= 2 && brightnessRaw <= 11 && isValidColor(currentColor))
+                ? currentColor : UNKNOWN_COLOR;
+        if (cur != UNKNOWN_COLOR && acceptPreviousRedOnStartup) {
+            // A live update can inherit red sent by 0.4.7. Keep its saved original restorable.
+            if (cur == PREVIOUS_RED && core.savedOriginal() != UNKNOWN_COLOR) cur = RED;
+            else acceptPreviousRedOnStartup = false;
+        }
         return core.update(nowMs, enabled, RED, sportActive, cur);
     }
 }

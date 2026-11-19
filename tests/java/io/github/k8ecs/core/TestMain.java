@@ -159,8 +159,12 @@ public final class TestMain {
         check(amb.ambOn && Settings.parse(amb.encode(), d).encode().equals(amb.encode()), "ambOn round trip");
         check(Settings.parse("enabled=1", d).encode().contains("ambOn=0"),
                 "old config without ambOn keeps default");
+        check(d.sportReleaseSec == 0
+                && Settings.parse(Settings.parse("sportReleaseSec=5", d).encode(), d).sportReleaseSec == 5,
+                "sport release defaults to zero and survives serialization");
         String[] bad = {"speedUp=10", "cornerOn=50", "cornerOff=300", "dwell=100", "foo=1", "speedUp", "gyroScale=NaN",
-                "clusterOn=2", "clusterTheme=0", "clusterTheme=5", "clusterTheme=abc", "ambOn=2"};
+                "clusterOn=2", "clusterTheme=0", "clusterTheme=5", "clusterTheme=abc", "ambOn=2",
+                "sportReleaseSec=-1", "sportReleaseSec=6"};
         for (String b : bad) {
             boolean threw = false;
             try { Settings.parse(b, d); } catch (IllegalArgumentException e) { threw = true; }
@@ -658,13 +662,30 @@ public final class TestMain {
                 && AmbientSportController.parseHex("1234") == AmbientSportController.UNKNOWN_COLOR
                 && AmbientSportController.parseHex("009b002100zz") == AmbientSportController.UNKNOWN_COLOR,
                 "parseHex rejects invalid");
-        check("00ff00000000".equals(AmbientSportController.toHex(AmbientSportController.RED))
+        check("00fa00040051".equals(AmbientSportController.toHex(AmbientSportController.RED))
                 && "?".equals(AmbientSportController.toHex(AmbientSportController.UNKNOWN_COLOR)), "toHex format");
         byte[] rr = AmbientSportController.redBytes(AmbientSportController.RED);
         byte[] rg = AmbientSportController.greenBytes(AmbientSportController.RED);
         byte[] rb = AmbientSportController.blueBytes(AmbientSportController.RED);
-        check(rr[0] == 0 && (rr[1] & 0xff) == 0xff && rg[0] == 0 && rg[1] == 0 && rb[0] == 0 && rb[1] == 0,
-                "RED channel bytes");
+        check(rr[0] == 0 && (rr[1] & 0xff) == 0xfa && rg[0] == 0 && rg[1] == 4 && rb[0] == 0 && rb[1] == 0x51,
+                "red matches the factory selector bytes");
+
+        AmbientSportController upgraded = new AmbientSportController(0, theme);
+        check(upgraded.update(0, true, false, 0x00ff00000000L, 6) == theme,
+                "upgrade: restore a saved theme from the previous red");
+        check(upgraded.update(3000, true, false, 0x00ff00000000L, 6) == theme && upgraded.misses() == 1,
+                "upgrade: retry restore while the previous red is still present");
+
+        AmbientSportController reconfigured = new AmbientSportController();
+        reconfigured.update(0, true, true, theme, 6);
+        reconfigured.update(100, true, true, AmbientSportController.RED, 6);
+        reconfigured.setReleaseMs(5000);
+        check(reconfigured.update(1000, true, false, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "configured delay starts at sport exit");
+        reconfigured.setReleaseMs(3000);
+        check(reconfigured.update(3999, true, false, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND
+                && reconfigured.update(4000, true, false, AmbientSportController.RED, 6) == theme,
+                "changing the delay keeps the original and the elapsed sport-off time");
 
         // 1. Sport start saves original & sends red; sport end restores immediately (respecting 3 s min gap).
         AmbientSportController a = new AmbientSportController();

@@ -28,7 +28,7 @@ final class SeogaemoBridge {
     // One Seogaemo card (k8-mydrive) carries all three items, their links and the shared limits.
     static final String[] PROPS = {"mydrive", "suspon", "speedup", "hyst", "corner_on", "corner_off", "dwell", "lnk_se",
             "lnk_sh", "steeron", "steerup", "steerhyst", "steercon", "steercoff", "steerdwell", "engon", "engpedal",
-            "enghold", "lnk_es", "lnk_eh", "maxpm", "cl_on", "cl_th", "amb_on"};
+            "enghold", "lnk_es", "lnk_eh", "maxpm", "cl_on", "cl_th", "amb_on", "sp_rel"};
     private String lastKey;
     private boolean lastOn;
     private Method getProp, setProp;
@@ -114,6 +114,7 @@ final class SeogaemoBridge {
         {"c_on", "cl_on", "0", ""},
         {"c_th", "cl_th", "1", "1|2|3|4"},
         {"a_on", "amb_on", "0", ""},
+        {"sp_rel", "sp_rel", "1", "0|1|2|3|4|5"},
     };
 
     static final String SG_ROOT = "/data/nemesis/apps/hmg-seogaemo/bin/hmg-seogaemo-root";
@@ -129,7 +130,7 @@ final class SeogaemoBridge {
                 s.suspLinkEng ? 1 : 0, s.suspLinkSteer ? 1 : 0, s.steerOn ? 1 : 0, s.steerSpeedUpKmh,
                 s.steerHysteresisKmh, s.steerCornerOnMilliG, s.steerCornerOffMilliG, s.steerDwellMs,
                 s.engOn ? 1 : 0, s.engPedalPct, s.engHoldMs, s.engLinkSusp ? 1 : 0, s.engLinkSteer ? 1 : 0,
-                s.maxPerMinute, s.clusterOn ? 1 : 0, s.clusterTheme, s.ambOn ? 1 : 0};
+                s.maxPerMinute, s.clusterOn ? 1 : 0, s.clusterTheme, s.ambOn ? 1 : 0, s.sportReleaseSec};
         String[] out = new String[CARD.length];
         for (int i = 0; i < CARD.length; i++) {
             int div = Integer.parseInt(CARD[i][2]);
@@ -200,7 +201,8 @@ final class SeogaemoBridge {
         StringBuilder writes = new StringBuilder();
         String lastName = null, lastValue = null;
         for (int i = 0; i < CARD.length; i++) {
-            if (want[i].equals(get(CARD[i][1]))) continue;
+            String current = get(CARD[i][1]);
+            if (want[i].equals(current) || ("sp_rel".equals(CARD[i][0]) && current.length() == 0)) continue;
             if (lastName != null) writes.append("printf %s ").append(lastValue).append(" > ").append(SG_SETTINGS).append(lastName).append("; ");
             lastName = CARD[i][0];
             lastValue = want[i];
@@ -299,6 +301,7 @@ final class SeogaemoBridge {
         String clOn = v.get("cl_on");
         String clTh = v.get("cl_th");
         String ambOn = v.get("amb_on");
+        String sportRelease = v.get("sp_rel");
         return "enabled=1 suspOn=" + tog(v.get("suspon")) + " speedUp=" + num(v.get("speedup")) + " hyst=" + num(v.get("hyst"))
                 + " cornerOn=" + num(v.get("corner_on")) * 10 + " cornerOff=" + num(v.get("corner_off")) * 10
                 + " dwell=" + num(v.get("dwell")) * 1000 + " suspLinkEng=" + tog(v.get("lnk_se"))
@@ -311,7 +314,8 @@ final class SeogaemoBridge {
                 + " engLinkSteer=" + tog(v.get("lnk_eh")) + " maxPerMin=" + num(v.get("maxpm"))
                 + (clOn != null && clOn.length() > 0 ? " clusterOn=" + tog(clOn) : "")
                 + (clTh != null && clTh.length() > 0 ? " clusterTheme=" + num(clTh) : "")
-                + (ambOn != null && ambOn.length() > 0 ? " ambOn=" + tog(ambOn) : "");
+                + (ambOn != null && ambOn.length() > 0 ? " ambOn=" + tog(ambOn) : "")
+                + (sportRelease != null && sportRelease.length() > 0 ? " sportReleaseSec=" + num(sportRelease) : "");
     }
 
     static int tog(String x) {

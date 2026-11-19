@@ -21,7 +21,7 @@ public final class SportOverrideController {
     public static final String REASON_OPTION_OFF = "option off";
     public static final String REASON_RESTORE_RESTART = "restore after restart";
 
-    private final long releaseMs;
+    private long releaseMs;
     private long savedOriginal = NO_VALUE;
     private long appliedTarget = NO_VALUE;
     private boolean fromRestart;
@@ -39,12 +39,16 @@ public final class SportOverrideController {
     private String lastReason = "";
 
     public SportOverrideController(long releaseMs, long persistedOriginal) {
-        if (releaseMs < 0) throw new IllegalArgumentException("releaseMs");
-        this.releaseMs = releaseMs;
+        setReleaseMs(releaseMs);
         if (persistedOriginal >= 0) {
             this.savedOriginal = persistedOriginal;
             this.fromRestart = true;
         }
+    }
+
+    public void setReleaseMs(long releaseMs) {
+        if (releaseMs < 0) throw new IllegalArgumentException("releaseMs");
+        this.releaseMs = releaseMs;
     }
 
     public long savedOriginal() { return savedOriginal; }

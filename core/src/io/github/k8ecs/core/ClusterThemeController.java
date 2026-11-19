@@ -68,6 +68,7 @@ public final class ClusterThemeController {
 
     /** Called when ignition goes off so an in-flight command does not falsely time out when IGN returns. */
     public void onIgnitionOff() { core.onIgnitionOff(); }
+    public void setReleaseMs(long releaseMs) { core.setReleaseMs(releaseMs); }
 
     /**
      * Evaluates one tick with the ignition on.

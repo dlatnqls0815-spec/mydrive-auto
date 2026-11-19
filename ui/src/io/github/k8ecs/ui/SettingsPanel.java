@@ -77,12 +77,12 @@ public final class SettingsPanel {
     private TextView speedValue, modeChip, footer;
     private MeterRow speedRow, latRow, pedalRow;
     private TextView[] itemState = new TextView[3], itemBadge = new TextView[3];
-    private boolean carKnowsEngNormal, carKnowsCluster, carKnowsAmb;
+    private boolean carKnowsEngNormal, carKnowsCluster, carKnowsAmb, carKnowsSportRelease;
     private Toggle enabled, suspOn, steerOn, engOn, engNormal, suspLinkEng, suspLinkSteer, engLinkSusp, engLinkSteer, clusterOn, ambOn;
     private Choice clusterTheme;
     private Stepper speedUp, hyst, cornerOn, cornerOff, dwell, maxPerMin;
     private Stepper steerSpeedUp, steerHyst, steerCornerOn, steerCornerOff, steerDwell;
-    private Stepper engPedal, engHold;
+    private Stepper engPedal, engHold, sportRelease;
     private final LinearLayout[] tabs = new LinearLayout[3];
     private final TextView[] tabButtons = new TextView[3];
     private TextView saveButton;
@@ -173,6 +173,7 @@ public final class SettingsPanel {
         });
 
         ambOn = new Toggle();
+        sportRelease = new Stepper(0, 5, 1, 0, "초");
         clusterOn = new Toggle();
         clusterTheme = new Choice(new String[] {"테마 A", "테마 B", "테마 C", "테마 D"});
         clusterCard = buildClusterCard();
@@ -637,14 +638,16 @@ public final class SettingsPanel {
     private LinearLayout buildClusterCard() {
         LinearLayout card = card();
         card.addView(sectionLabel("스포츠 표시"));
+        card.addView(stepRow(sportRelease, "스포츠 종료 후 복귀 대기",
+                "클러스터와 앰비언트에 함께 적용돼요. 0초는 추가 대기 없이 복귀하며, 송신 간격은 최소 3초예요."));
         card.addView(toggleRow(ambOn, "스포츠일 때 앰비언트 빨강",
-                "스포츠 모드이거나 마이 드라이브에서 엔진·서스펜션·핸들 중 하나라도 스포츠면 차량 앰비언트를 빨강으로 바꾸고, 끝나면 바로 원래 색으로 돌려놓아요. 사제 조명은 차량 색을 그대로 따라가요.", 15));
+                "스포츠 모드이거나 마이 드라이브에서 엔진·서스펜션·핸들 중 하나라도 스포츠면 차량 앰비언트를 빨강으로 바꿔요.", 15));
         ambStatus = text("", 12, c.muted, null);
         ambStatus.setVisibility(View.GONE);
         card.addView(ambStatus);
         card.addView(divider());
         card.addView(toggleRow(clusterOn, "스포츠일 때 클러스터 테마 바꾸기",
-                "스포츠 모드이거나 마이 드라이브에서 엔진·서스펜션·핸들 중 하나라도 스포츠면 고른 테마로 바꾸고, 끝나면 바로 원래 테마로 돌려놓아요.", 15));
+                "스포츠 모드이거나 마이 드라이브에서 엔진·서스펜션·핸들 중 하나라도 스포츠면 고른 테마로 바꿔요.", 15));
         card.addView(choiceRow(clusterTheme, "스포츠 테마", null));
         TextView note = text("순정 클러스터 설정의 '드라이브 모드 연동'을 꺼야 작동해요. 순정 메뉴에서 테마를 직접 고르면 연동이 꺼져요.", 12, c.muted, null);
         note.setLineSpacing(0, 1.15f);
@@ -764,7 +767,8 @@ public final class SettingsPanel {
                 + (carKnowsCluster || clusterOn.on || clusterTheme.value != 1
                         ? " clusterOn=" + clusterOn.bit() + " clusterTheme=" + clusterTheme.value : "")
                 // Older car modules (0.4.6 and before) reject unknown keys: send it only when known or on.
-                + (carKnowsAmb || ambOn.on ? " ambOn=" + ambOn.bit() : "");
+                + (carKnowsAmb || ambOn.on ? " ambOn=" + ambOn.bit() : "")
+                + (carKnowsSportRelease || sportRelease.value != 0 ? " sportReleaseSec=" + sportRelease.value : "");
         saveButton.setText("저장 중…");
         if (topSave != null) topSave.setText("저장 중…");
         saving = true;
@@ -845,6 +849,7 @@ public final class SettingsPanel {
         if (reply.contains("unknown key: engNormal")) return "노멀 선택은 차량 모듈 0.4.1부터 됩니다. 차량 쪽을 먼저 올려 주세요.";
         if (reply.contains("unknown key: cluster")) return "클러스터 테마는 차량 모듈 0.4.5부터 됩니다. 차량 쪽을 먼저 올려 주세요.";
         if (reply.contains("unknown key: ambOn")) return "앰비언트 스포츠 빨강은 차량 모듈 0.4.7부터 됩니다. 차량 쪽을 먼저 올려 주세요.";
+        if (reply.contains("unknown key: sportReleaseSec")) return "복귀 대기를 바꾸려면 차량 모듈 0.4.8 이상이 필요합니다.";
         if (reply.contains("clusterTheme")) return "클러스터 테마는 A~D 중에서 골라야 합니다.";
         if (reply.contains("speedHysteresis")) return "여유는 3 이상이어야 합니다.";
         return reply;
@@ -868,6 +873,8 @@ public final class SettingsPanel {
         clusterTheme.set(ct >= 1 && ct <= 4 ? ct : 1);
         carKnowsAmb = m.containsKey("ambOn");
         ambOn.set("1".equals(m.get("ambOn")));
+        carKnowsSportRelease = m.containsKey("sportReleaseSec");
+        sportRelease.set(parse(m.get("sportReleaseSec")));
         speedUp.set(parse(m.get("speedUp")));
         hyst.set(parse(m.get("hyst")));
         cornerOn.set(parse(m.get("cornerOn")) / 10);

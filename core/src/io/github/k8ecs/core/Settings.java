@@ -47,6 +47,7 @@ public final class Settings {
     public final int clusterTheme;    // 1..4 (theme A..D)
     // Ambient sport red: switch factory ambient light to red in Sport or when any My Drive item is in Sport.
     public final boolean ambOn;
+    public final int sportReleaseSec;
 
     private Settings(Map<String, String> m) {
         enabled = flag(m, "enabled");
@@ -76,12 +77,14 @@ public final class Settings {
         clusterOn = flag(m, "clusterOn");
         clusterTheme = num(m, "clusterTheme");
         ambOn = flag(m, "ambOn");
+        sportReleaseSec = num(m, "sportReleaseSec");
 
         speedRule("speedUp", speedUpKmh, hysteresisKmh, "speedHysteresis");
         speedRule("steerSpeedUp", steerSpeedUpKmh, steerHysteresisKmh, "steerHyst");
         if (Double.isNaN(gyroScale) || Math.abs(gyroScale) > 10) throw new IllegalArgumentException("gyroScale");
         if (engPedalPct < 5 || engPedalPct > 100) throw new IllegalArgumentException("engPedal 5..100");
         if (engHoldMs < 1000 || engHoldMs > 60000) throw new IllegalArgumentException("engHold 1..60 s");
+        if (sportReleaseSec < 0 || sportReleaseSec > 5) throw new IllegalArgumentException("sportReleaseSec 0..5 s");
         if (clusterTheme < ClusterThemeController.MIN_THEME || clusterTheme > ClusterThemeController.MAX_THEME) {
             throw new IllegalArgumentException("clusterTheme 1..4");
         }
@@ -122,6 +125,7 @@ public final class Settings {
         m.put("clusterOn", "0");
         m.put("clusterTheme", "1");
         m.put("ambOn", "0");
+        m.put("sportReleaseSec", "0");
         return m;
     }
 
@@ -178,6 +182,7 @@ public final class Settings {
         m.put("clusterOn", clusterOn ? "1" : "0");
         m.put("clusterTheme", Integer.toString(clusterTheme));
         m.put("ambOn", ambOn ? "1" : "0");
+        m.put("sportReleaseSec", Integer.toString(sportReleaseSec));
         return m;
     }
 

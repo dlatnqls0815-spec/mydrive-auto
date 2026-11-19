@@ -7,29 +7,30 @@ choice_tab_eng=Engine
 st=Auto switching
 now=Now susp/steering/engine (switches)
 sp=Speed / lateral G / accelerator
-s_on=[Suspension] auto Eco/Sport
-s_up=[Suspension] firm above (km/h, 0 = off)
-s_hy=[Suspension] margin when slowing (km/h)
-s_co=[Suspension] corner on (0.01 g, 0 = off)
-s_cf=[Suspension] corner off (0.01 g)
-s_dw=[Suspension] minimum hold (s)
+so=[Suspension] auto Eco/Sport
+su=[Suspension] firm above (km/h, 0 = off)
+sy=[Suspension] margin when slowing (km/h)
+sc=[Suspension] corner on (0.01 g, 0 = off)
+sf=[Suspension] corner off (0.01 g)
+sw=[Suspension] minimum hold (s)
 se=[Suspension] sport also sets engine sport
 ss=[Suspension] sport also sets steering sport
-h_on=[Steering] auto Normal/Sport
-h_up=[Steering] sport above (km/h, 0 = off)
-h_hy=[Steering] margin when slowing (km/h)
-h_co=[Steering] corner on (0.01 g, 0 = off)
-h_cf=[Steering] corner off (0.01 g)
-h_dw=[Steering] minimum hold (s)
-e_on=[Engine] auto Eco/Sport by accelerator
-e_pd=[Engine] sport at accelerator (%)
-e_hd=[Engine] back to Eco after (s)
+ho=[Steering] auto Normal/Sport
+hu=[Steering] sport above (km/h, 0 = off)
+hy=[Steering] margin when slowing (km/h)
+hc=[Steering] corner on (0.01 g, 0 = off)
+hf=[Steering] corner off (0.01 g)
+hw=[Steering] minimum hold (s)
+eo=[Engine] auto Eco/Sport by accelerator
+ep=[Engine] sport at accelerator (%)
+ed=[Engine] back to Eco after (s)
 es=[Engine] sport also sets suspension sport
 er=[Engine] sport also sets steering sport
 mx=Max switches per minute (each item)
-a_on=[Ambient] sport red
-c_on=[Cluster] sport theme auto
-c_th=[Cluster] sport theme
+ao=[Ambient] sport red
+sp_rel=Sport exit restore delay (seconds)
+co=[Cluster] sport theme auto
+ct=[Cluster] sport theme
 choice_c_th_1=Theme A
 choice_c_th_2=Theme B
 choice_c_th_3=Theme C

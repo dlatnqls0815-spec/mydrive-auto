@@ -2,28 +2,29 @@ choice setting=tab label=@tab
 value label=@st key=st
 value label=@now key=now
 value label=@sp key=sp
-toggle setting=s_on label=@s_on when=s
-choice setting=s_up label=@s_up when=s
-choice setting=s_hy label=@s_hy when=s
-choice setting=s_co label=@s_co when=s
-choice setting=s_cf label=@s_cf when=s
-choice setting=s_dw label=@s_dw when=s
+toggle setting=s_on label=@so when=s
+choice setting=s_up label=@su when=s
+choice setting=s_hy label=@sy when=s
+choice setting=s_co label=@sc when=s
+choice setting=s_cf label=@sf when=s
+choice setting=s_dw label=@sw when=s
 toggle setting=s_eng label=@se when=s
 toggle setting=s_str label=@ss when=s
-toggle setting=h_on label=@h_on when=h
-choice setting=h_up label=@h_up when=h
-choice setting=h_hy label=@h_hy when=h
-choice setting=h_co label=@h_co when=h
-choice setting=h_cf label=@h_cf when=h
-choice setting=h_dw label=@h_dw when=h
-toggle setting=e_on label=@e_on when=e
-choice setting=e_pd label=@e_pd when=e
-choice setting=e_hd label=@e_hd when=e
+toggle setting=h_on label=@ho when=h
+choice setting=h_up label=@hu when=h
+choice setting=h_hy label=@hy when=h
+choice setting=h_co label=@hc when=h
+choice setting=h_cf label=@hf when=h
+choice setting=h_dw label=@hw when=h
+toggle setting=e_on label=@eo when=e
+choice setting=e_pd label=@ep when=e
+choice setting=e_hd label=@ed when=e
 toggle setting=e_sus label=@es when=e
 toggle setting=e_str label=@er when=e
 choice setting=mx label=@mx
-toggle setting=a_on label=@a_on
-toggle setting=c_on label=@c_on
-choice setting=c_th label=@c_th
+toggle setting=a_on label=@ao
+toggle setting=c_on label=@co
+choice setting=c_th label=@ct
+choice setting=sp_rel label=@sp_rel
 value label=@cf key=cf
 button name=save_log label=@sl

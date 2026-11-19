@@ -28,5 +28,6 @@ set_prop persist.sys.k8ecs.maxpm {setting:mx}
 set_prop persist.sys.k8ecs.cl_on {setting:c_on}
 set_prop persist.sys.k8ecs.cl_th {setting:c_th}
 set_prop persist.sys.k8ecs.amb_on {setting:a_on}
+set_prop persist.sys.k8ecs.sp_rel {setting:sp_rel}
 set_prop persist.sys.k8ecs.mydrive 1
 fi

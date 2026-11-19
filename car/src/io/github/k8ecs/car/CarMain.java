@@ -7,6 +7,7 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.Parcel;
 import android.os.ParcelFileDescriptor;
+import android.os.SystemClock;
 
 import io.github.k8ecs.core.AccelLateral;
 import io.github.k8ecs.core.AmbientSportController;
@@ -48,7 +49,7 @@ import java.util.UUID;
  * moving forward. Settings over 127.0.0.1 TCP (head unit app) and Bluetooth RFCOMM (phone).
  */
 public final class CarMain {
-    static final String VERSION = "0.4.7";
+    static final String VERSION = "0.4.8";
     /** BCM getSpeed_KMHUnit() returns the display speed raw value in 0.5 km/h steps (65 = 32.5 km/h on the cluster). */
     static final float BCM_SPEED_RAW_PER_KMH = 2f;
     static final String LOG_DIR = "/data/nemesis/logs/k8ecs.damping";
@@ -385,6 +386,8 @@ public final class CarMain {
         } else if (ambController.isHalted()) {
             ambController.clearHalt();
         }
+        clusterController.setReleaseMs(s.sportReleaseSec * 1000L);
+        ambController.setReleaseMs(s.sportReleaseSec * 1000L);
     }
 
     boolean clusterOnLocked() {
@@ -726,10 +729,12 @@ public final class CarMain {
     void control() {
         IBinder bcm = null, sys = null, hscan = null, usm = null;
         long lastSummary = 0, lastPedalTry = 0, lastUsmFind = 0, lastUsmPoll = 0;
+        long ambientReadbackAt = 0;
         boolean usmReadErrLogged = false;
         while (true) {
             sleep(100);
             long now = System.currentTimeMillis();
+            long displayNow = SystemClock.elapsedRealtime();
             try {
                 if (bcm == null) bcm = Binder.service("com.hkmc.micom.bcm");
                 if (sys == null) sys = Binder.service("com.hkmc.micom.system");
@@ -863,7 +868,7 @@ public final class CarMain {
                         int prevMisses = clusterController.misses();
                         boolean prevHalted = clusterController.isHalted();
                         int prevOrig = clusterController.savedOriginal();
-                        clusterCmd = clusterController.update(now, clusterOnLocked(), settings.clusterTheme,
+                        clusterCmd = clusterController.update(displayNow, clusterOnLocked(), settings.clusterTheme,
                                 isSportActiveLocked(), clusterTheme);
                         if (clusterController.misses() > prevMisses) {
                             Log.i("no feedback for cluster theme " + clusterController.lastMissedTheme()
@@ -893,7 +898,7 @@ public final class CarMain {
                         int prevMisses = ambController.misses();
                         boolean prevHalted = ambController.isHalted();
                         long prevOrig = ambController.savedOriginal();
-                        ambCmd = ambController.update(now, ambOnLocked(), isSportActiveLocked(), ambColor, ambBrightness);
+                        ambCmd = ambController.update(displayNow, ambOnLocked(), isSportActiveLocked(), ambColor, ambBrightness);
                         if (ambController.misses() > prevMisses) {
                             Log.i("no feedback for ambient " + AmbientSportController.toHex(ambController.lastMissedColor())
                                     + " (" + ambController.misses() + ")");
@@ -934,10 +939,18 @@ public final class CarMain {
                                 AmbientSportController.redBytes(ambCmd),
                                 AmbientSportController.greenBytes(ambCmd),
                                 AmbientSportController.blueBytes(ambCmd));
+                        ambientReadbackAt = displayNow + 600;
                         Log.i("AMBIENT rgb " + AmbientSportController.toHex(ambCmd) + " (" + ambWhy + ")");
                     } catch (Exception e) {
                         sys = null;
                         Log.i("ambient rgb send failed: " + e);
+                    }
+                } else if (ambientReadbackAt != 0 && displayNow >= ambientReadbackAt && sys != null) {
+                    ambientReadbackAt = 0;
+                    try {
+                        Binder.requestSMLStatus(sys);
+                    } catch (Exception e) {
+                        Log.i("ambient status readback failed: " + e);
                     }
                 }
             } catch (Exception e) {
@@ -975,6 +988,7 @@ public final class CarMain {
                 + " clusterAutoSet=" + (clusterAutoSet >= 0 ? Integer.toString(clusterAutoSet) : "?")
                 + " amb=" + ambStateLocked()
                 + " ambRgb=" + AmbientSportController.toHex(ambColor)
+                + " ambLink=" + (ambLink >= 0 ? Integer.toString(ambLink) : "?")
                 + " imu=" + imuState.replace(' ', '_')
                 + " frames=" + imuFrames + " gyroScale=" + scale + " turns=" + gyro.segmentCount()
                 + " bias=" + (Double.isNaN(gyro.bias()) ? "?" : String.format(Locale.US, "%.1f", gyro.bias()))
@@ -1249,7 +1263,7 @@ public final class CarMain {
             Parcel d = Parcel.obtain(), r = Parcel.obtain();
             try {
                 d.writeInterfaceToken("com.hkmc.micom.ISystemService");
-                sys.transact(0x4c, d, r, 0);
+                if (!sys.transact(0x4c, d, r, 0)) throw new IOException("requestSMLStatus unsupported");
                 r.readException();
             } finally { d.recycle(); r.recycle(); }
         }
@@ -1265,7 +1279,7 @@ public final class CarMain {
                 d.writeByteArray(red);
                 d.writeByteArray(green);
                 d.writeByteArray(blue);
-                sys.transact(0x4e, d, r, 0);
+                if (!sys.transact(0x4e, d, r, 0)) throw new IOException("setSMLRGB unsupported");
                 r.readException();
             } finally { d.recycle(); r.recycle(); }
         }
