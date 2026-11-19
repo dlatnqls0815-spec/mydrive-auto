@@ -33,6 +33,7 @@ public final class TestMain {
         pedal();
         links();
         clusterTheme();
+        ambientSport();
         System.out.println("core tests passed: " + passed);
     }
 
@@ -153,8 +154,13 @@ public final class TestMain {
         check(Settings.parse(cl.encode(), d).encode().equals(cl.encode()), "cluster settings round trip");
         check(Settings.parse("enabled=1", d).encode().contains("clusterOn=0 clusterTheme=1"),
                 "old config without cluster keys keeps defaults");
+        check(!d.ambOn, "ambient sport red off by default");
+        Settings amb = Settings.parse("ambOn=1", d);
+        check(amb.ambOn && Settings.parse(amb.encode(), d).encode().equals(amb.encode()), "ambOn round trip");
+        check(Settings.parse("enabled=1", d).encode().contains("ambOn=0"),
+                "old config without ambOn keeps default");
         String[] bad = {"speedUp=10", "cornerOn=50", "cornerOff=300", "dwell=100", "foo=1", "speedUp", "gyroScale=NaN",
-                "clusterOn=2", "clusterTheme=0", "clusterTheme=5", "clusterTheme=abc"};
+                "clusterOn=2", "clusterTheme=0", "clusterTheme=5", "clusterTheme=abc", "ambOn=2"};
         for (String b : bad) {
             boolean threw = false;
             try { Settings.parse(b, d); } catch (IllegalArgumentException e) { threw = true; }
@@ -204,6 +210,28 @@ public final class TestMain {
                 "cluster theme 5 rejected");
         check(CarLog.clusterTheme(p + "nothing") == -1, "unrelated line returns -1");
         check(CarLog.clusterTheme(null) == -1, "null line returns -1");
+
+        byte[] sml1 = CarLog.smlStatus("11-20 05:10:00.000 D/SystemService(  688): SYS_SML_STATUS_M_RESP: 0x00 0x9b 0x00 0x21 0x00 0xef 0x0b 0x01 0x01 ");
+        check(sml1 != null && sml1.length == 9
+                && (sml1[0] & 0xff) == 0x00 && (sml1[1] & 0xff) == 0x9b
+                && (sml1[5] & 0xff) == 0xef && (sml1[6] & 0xff) == 0x0b
+                && (sml1[8] & 0xff) == CarLog.SML_LINK_OFF, "SML status direct form parsed");
+        check(AmbientSportController.packColor(sml1) == 0x009b002100efL
+                && "009b002100ef".equals(AmbientSportController.toHex(AmbientSportController.packColor(sml1))),
+                "SML direct color packed and formatted");
+        byte[] sml2 = CarLog.smlStatus("11-20 05:10:01.000 D/SystemService(  688): [MicomEventHandler.handleMessage] SYS_SML_STATUS_M_RESP: 0x01 0x6b 0x01 0x5a 0x01 0x95 0x01 0x01 0x01");
+        check(sml2 != null && sml2.length == 9
+                && AmbientSportController.packColor(sml2) == 0x016b015a0195L
+                && (sml2[6] & 0xff) == CarLog.SML_BRIGHTNESS_OFF, "SML status MicomEventHandler form parsed");
+        check(CarLog.smlStatus(p + "SYS_SML_STATUS_M_RESP: 0x00 0x9b 0x00 0x21 0x00 0xef 0x0b 0x01") == null,
+                "SML short line rejected");
+        check(CarLog.smlStatus(p + "SYS_SML_STATUS_M_RESP: 0x00 0xzz 0x00 0x21 0x00 0xef 0x0b 0x01 0x01") == null,
+                "SML garbage token rejected");
+        check(CarLog.smlStatus(p + "SYS_SML_STATUS_M_RESP: 0x00 0x100 0x00 0x21 0x00 0xef 0x0b 0x01 0x01") == null,
+                "SML out-of-range byte rejected");
+        check(CarLog.smlStatus(p + "[SystemService.setSMLRGB] red: 0x00 0xc1 , green: 0x00 0x21 , blue: 0x00 0xe0 , called by 2060") == null,
+                "SML command line ignored");
+        check(CarLog.smlStatus(null) == null, "SML null line returns null");
     }
 
     private static void speedHysteresis() {
@@ -460,7 +488,8 @@ public final class TestMain {
     }
 
     private static void clusterTheme() {
-        // 1. Sport start, release delay (5 s), and sport end restore.
+        // 1. Sport start and immediate restore on sport end (release = 0 ms, respecting 3 s min gap).
+        check(ClusterThemeController.DEFAULT_RELEASE_MS == 0L, "cluster default release is immediate (0 ms)");
         ClusterThemeController c = new ClusterThemeController();
         check(c.update(0, true, 1, true, -1) == ClusterThemeController.NO_COMMAND, "unknown current theme: no command");
         check(c.update(100, true, 1, true, 4) == 1, "sport start switches 4 -> 1");
@@ -468,24 +497,42 @@ public final class TestMain {
                 "savedOriginal=4 and reason=sport start");
         check(c.update(500, true, 1, true, 1) == ClusterThemeController.NO_COMMAND && !c.hasPending(),
                 "matching feedback clears pending");
-        check(c.update(1000, true, 1, false, 1) == ClusterThemeController.NO_COMMAND, "sport off starts release delay");
-        check(c.update(5900, true, 1, false, 1) == ClusterThemeController.NO_COMMAND, "4.9 s off: still waiting");
-        check(c.update(6000, true, 1, false, 1) == 4, "5.0 s off: restores original theme 4");
+        check(c.update(1000, true, 1, false, 1) == ClusterThemeController.NO_COMMAND,
+                "sport off within 3 s min gap waits for rate limit");
+        check(c.update(3099, true, 1, false, 1) == ClusterThemeController.NO_COMMAND,
+                "2.999 s since last send: still rate-limited");
+        check(c.update(3100, true, 1, false, 1) == 4,
+                "3.0 s min gap reached: restores original theme 4 immediately");
         check(ClusterThemeController.REASON_SPORT_END.equals(c.lastReason()) && c.savedOriginal() == -1,
                 "reason=sport end and savedOriginal cleared");
-        check(c.update(6500, true, 1, false, 4) == ClusterThemeController.NO_COMMAND && !c.hasPending(),
+        check(c.update(3500, true, 1, false, 4) == ClusterThemeController.NO_COMMAND && !c.hasPending(),
                 "restore confirmed");
 
-        // 2. Flapping inside the release delay resets the timer.
+        // Immediate restore with no delay when >= 3 s already elapsed since sport start.
+        ClusterThemeController imm = new ClusterThemeController();
+        check(imm.update(0, true, 1, true, 4) == 1, "imm: sport start");
+        check(imm.update(300, true, 1, true, 1) == ClusterThemeController.NO_COMMAND, "imm: confirmed");
+        check(imm.update(4000, true, 1, false, 1) == 4
+                && ClusterThemeController.REASON_SPORT_END.equals(imm.lastReason())
+                && imm.savedOriginal() == -1, "imm: sport off after >= 3 s restores at once");
+
+        // 2. Flapping within 3 s min gap does not restore; custom non-zero releaseMs still delays restore.
         ClusterThemeController flap = new ClusterThemeController();
         check(flap.update(0, true, 2, true, 4) == 2, "flap: sport start");
         check(flap.update(200, true, 2, true, 2) == ClusterThemeController.NO_COMMAND, "flap: confirmed");
-        check(flap.update(1000, true, 2, false, 2) == ClusterThemeController.NO_COMMAND, "flap: sport off");
-        check(flap.update(5000, true, 2, false, 2) == ClusterThemeController.NO_COMMAND, "flap: 4 s off");
-        check(flap.update(5500, true, 2, true, 2) == ClusterThemeController.NO_COMMAND, "flap: sport back on resets delay");
-        check(flap.update(6000, true, 2, false, 2) == ClusterThemeController.NO_COMMAND, "flap: off again");
-        check(flap.update(10900, true, 2, false, 2) == ClusterThemeController.NO_COMMAND, "flap: 4.9 s since second off");
-        check(flap.update(11000, true, 2, false, 2) == 4, "flap: restores after full 5 s continuous off");
+        check(flap.update(1000, true, 2, false, 2) == ClusterThemeController.NO_COMMAND, "flap: sport off within gap");
+        check(flap.update(2000, true, 2, true, 2) == ClusterThemeController.NO_COMMAND, "flap: sport back on");
+        check(flap.update(4000, true, 2, false, 2) == 4, "flap: sport off after gap restores immediately");
+
+        ClusterThemeController delayed = new ClusterThemeController(5000L);
+        check(delayed.update(0, true, 2, true, 4) == 2, "delayed: sport start");
+        check(delayed.update(200, true, 2, true, 2) == ClusterThemeController.NO_COMMAND, "delayed: confirmed");
+        check(delayed.update(1000, true, 2, false, 2) == ClusterThemeController.NO_COMMAND, "delayed: sport off");
+        check(delayed.update(5000, true, 2, false, 2) == ClusterThemeController.NO_COMMAND, "delayed: 4 s off");
+        check(delayed.update(5500, true, 2, true, 2) == ClusterThemeController.NO_COMMAND, "delayed: sport back on resets delay");
+        check(delayed.update(6000, true, 2, false, 2) == ClusterThemeController.NO_COMMAND, "delayed: off again");
+        check(delayed.update(10900, true, 2, false, 2) == ClusterThemeController.NO_COMMAND, "delayed: 4.9 s since second off");
+        check(delayed.update(11000, true, 2, false, 2) == 4, "delayed: restores after full 5 s continuous off");
 
         // 3. Manual change during sport cancels without fighting back until next sport start.
         ClusterThemeController manual = new ClusterThemeController();
@@ -501,14 +548,14 @@ public final class TestMain {
         check(manual.update(16000, true, 1, true, 3) == 1 && manual.savedOriginal() == 3,
                 "manual: next sport start saves new theme 3 and sends target 1");
 
-        // 4. Manual change during release delay cancels restore.
+        // 4. Manual change while waiting on 3 s rate limit after sport off cancels restore.
         ClusterThemeController manualEnd = new ClusterThemeController();
         check(manualEnd.update(0, true, 1, true, 4) == 1, "manualEnd: sport start");
         check(manualEnd.update(300, true, 1, true, 1) == ClusterThemeController.NO_COMMAND, "manualEnd: confirmed");
-        check(manualEnd.update(1000, true, 1, false, 1) == ClusterThemeController.NO_COMMAND, "manualEnd: sport off");
+        check(manualEnd.update(1000, true, 1, false, 1) == ClusterThemeController.NO_COMMAND, "manualEnd: sport off within gap");
         check(manualEnd.update(2000, true, 1, false, 2) == ClusterThemeController.NO_COMMAND && manualEnd.savedOriginal() == -1,
-                "manualEnd: driver changed during release delay");
-        check(manualEnd.update(7000, true, 1, false, 2) == ClusterThemeController.NO_COMMAND,
+                "manualEnd: driver changed before restore sent");
+        check(manualEnd.update(4000, true, 1, false, 2) == ClusterThemeController.NO_COMMAND,
                 "manualEnd: no restore after driver changed");
 
         // 5. Already at target: nothing sent, savedOriginal stays -1, nothing restored.
@@ -539,14 +586,14 @@ public final class TestMain {
         halt.clearHalt();
         check(!halt.isHalted() && halt.misses() == 0, "halt: clearHalt resets halt state");
 
-        // 7. Option off restores immediately without release delay; respects rate limit (3 s).
+        // 7. Option off restores immediately; respects rate limit (3 s).
         ClusterThemeController optOff = new ClusterThemeController();
         check(optOff.update(0, true, 1, true, 4) == 1, "optOff: sport start");
         check(optOff.update(400, true, 1, true, 1) == ClusterThemeController.NO_COMMAND, "optOff: confirmed");
         check(optOff.update(1000, false, 1, true, 1) == ClusterThemeController.NO_COMMAND && optOff.savedOriginal() == 4,
                 "rate limit blocks restore within 3 s of last send");
         check(optOff.update(2999, false, 1, true, 1) == ClusterThemeController.NO_COMMAND, "rate limit at 2.999 s");
-        check(optOff.update(3000, false, 1, true, 1) == 4, "optOff: restores at 3.0 s without 5 s release delay");
+        check(optOff.update(3000, false, 1, true, 1) == 4, "optOff: restores at 3.0 s");
         check(ClusterThemeController.REASON_OPTION_OFF.equals(optOff.lastReason()) && optOff.savedOriginal() == -1,
                 "optOff: reason=option off and savedOriginal cleared");
 
@@ -572,11 +619,9 @@ public final class TestMain {
         ClusterThemeController restartInSport = new ClusterThemeController(ClusterThemeController.DEFAULT_RELEASE_MS, 4);
         check(restartInSport.update(0, true, 1, true, 1) == ClusterThemeController.NO_COMMAND
                 && restartInSport.savedOriginal() == 4, "restart in sport: keeps savedOriginal");
-        check(restartInSport.update(1000, true, 1, false, 1) == ClusterThemeController.NO_COMMAND,
-                "restart in sport: waits for release delay");
-        check(restartInSport.update(6000, true, 1, false, 1) == 4
+        check(restartInSport.update(1000, true, 1, false, 1) == 4
                 && ClusterThemeController.REASON_SPORT_END.equals(restartInSport.lastReason()),
-                "restart in sport: restores when sport ends");
+                "restart in sport: restores immediately when sport ends");
 
         // 9. Ignition off clears pending so no false miss occurs on return.
         ClusterThemeController ign = new ClusterThemeController();
@@ -585,6 +630,171 @@ public final class TestMain {
         check(!ign.hasPending(), "ign: onIgnitionOff clears pending");
         check(ign.update(10000, true, 1, true, 1) == ClusterThemeController.NO_COMMAND && ign.misses() == 0,
                 "ign: no false miss after ignition returns");
+    }
+
+    private static void ambientSport() {
+        long blue = 0x009b002100efL;
+        long green = 0x001000c00020L;
+        long theme = 0x016b015a0195L;
+
+        // Color helpers & validation.
+        check(AmbientSportController.DEFAULT_RELEASE_MS == 0L, "ambient default release is immediate (0 ms)");
+        check(AmbientSportController.isValidColor(AmbientSportController.RED)
+                && AmbientSportController.isValidColor(blue)
+                && AmbientSportController.isValidColor(theme), "valid direct and theme colors accepted");
+        check(!AmbientSportController.isValidColor(-1L)
+                && !AmbientSportController.isValidColor(0x020000000000L), "invalid hi byte or negative rejected");
+        check(AmbientSportController.parseHex("009b002100ef") == blue
+                && AmbientSportController.parseHex("016B015A0195") == theme, "parseHex valid");
+        check(AmbientSportController.parseHex("029b002100ef") == AmbientSportController.UNKNOWN_COLOR
+                && AmbientSportController.parseHex("1234") == AmbientSportController.UNKNOWN_COLOR
+                && AmbientSportController.parseHex("009b002100zz") == AmbientSportController.UNKNOWN_COLOR,
+                "parseHex rejects invalid");
+        check("00ff00000000".equals(AmbientSportController.toHex(AmbientSportController.RED))
+                && "?".equals(AmbientSportController.toHex(AmbientSportController.UNKNOWN_COLOR)), "toHex format");
+        byte[] rr = AmbientSportController.redBytes(AmbientSportController.RED);
+        byte[] rg = AmbientSportController.greenBytes(AmbientSportController.RED);
+        byte[] rb = AmbientSportController.blueBytes(AmbientSportController.RED);
+        check(rr[0] == 0 && (rr[1] & 0xff) == 0xff && rg[0] == 0 && rg[1] == 0 && rb[0] == 0 && rb[1] == 0,
+                "RED channel bytes");
+
+        // 1. Sport start saves original & sends red; sport end restores immediately (respecting 3 s min gap).
+        AmbientSportController a = new AmbientSportController();
+        check(a.update(0, true, true, blue, 6) == AmbientSportController.RED, "amb: sport start sends red");
+        check(AmbientSportController.REASON_SPORT_START.equals(a.lastReason()) && a.savedOriginal() == blue,
+                "amb: savedOriginal=blue and reason=sport start");
+        check(a.update(400, true, true, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND
+                && !a.hasPending(), "amb: matching feedback clears pending");
+        check(a.update(1000, true, false, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb: sport off within 3 s min gap waits");
+        check(a.update(2999, true, false, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb: 2.999 s still rate-limited");
+        check(a.update(3000, true, false, AmbientSportController.RED, 6) == blue,
+                "amb: restores blue at 3.0 s gap");
+        check(AmbientSportController.REASON_SPORT_END.equals(a.lastReason())
+                && a.savedOriginal() == AmbientSportController.UNKNOWN_COLOR, "amb: reason=sport end and cleared");
+        check(a.update(3400, true, false, blue, 6) == AmbientSportController.NO_COMMAND && !a.hasPending(),
+                "amb: restore confirmed");
+
+        AmbientSportController imm = new AmbientSportController();
+        check(imm.update(0, true, true, blue, 6) == AmbientSportController.RED, "amb imm: start");
+        check(imm.update(300, true, true, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb imm: confirmed");
+        check(imm.update(4000, true, false, AmbientSportController.RED, 6) == blue
+                && AmbientSportController.REASON_SPORT_END.equals(imm.lastReason()),
+                "amb imm: restores at once after >= 3 s");
+
+        // 2. Flapping within 3 s min gap and optional release delay.
+        AmbientSportController flap = new AmbientSportController();
+        check(flap.update(0, true, true, blue, 6) == AmbientSportController.RED, "amb flap: start");
+        check(flap.update(200, true, true, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb flap: confirmed");
+        check(flap.update(1000, true, false, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb flap: off within gap");
+        check(flap.update(2000, true, true, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb flap: back on");
+        check(flap.update(4000, true, false, AmbientSportController.RED, 6) == blue,
+                "amb flap: off after gap restores immediately");
+
+        AmbientSportController delayed = new AmbientSportController(5000L);
+        check(delayed.update(0, true, true, blue, 6) == AmbientSportController.RED, "amb delayed: start");
+        check(delayed.update(200, true, true, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb delayed: confirmed");
+        check(delayed.update(1000, true, false, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb delayed: off");
+        check(delayed.update(5500, true, true, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb delayed: back on resets delay");
+        check(delayed.update(6000, true, false, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb delayed: off again");
+        check(delayed.update(10900, true, false, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb delayed: 4.9 s");
+        check(delayed.update(11000, true, false, AmbientSportController.RED, 6) == blue,
+                "amb delayed: restores after 5 s");
+
+        // 3. Manual change during sport cancels without fighting back.
+        AmbientSportController manual = new AmbientSportController();
+        check(manual.update(0, true, true, blue, 6) == AmbientSportController.RED, "amb manual: start");
+        check(manual.update(300, true, true, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb manual: confirmed");
+        check(manual.update(4000, true, true, green, 6) == AmbientSportController.NO_COMMAND
+                && manual.savedOriginal() == AmbientSportController.UNKNOWN_COLOR,
+                "amb manual: user change cancels and clears savedOriginal");
+        check(manual.update(8000, true, true, green, 6) == AmbientSportController.NO_COMMAND,
+                "amb manual: does not fight back");
+        check(manual.update(9000, true, false, green, 6) == AmbientSportController.NO_COMMAND,
+                "amb manual: sport end does not overwrite");
+        check(manual.update(10000, true, true, green, 6) == AmbientSportController.RED
+                && manual.savedOriginal() == green, "amb manual: next sport saves new color green");
+
+        // 4. Already red at start -> nothing saved, nothing sent, nothing restored.
+        AmbientSportController same = new AmbientSportController();
+        check(same.update(0, true, true, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND
+                && same.savedOriginal() == AmbientSportController.UNKNOWN_COLOR,
+                "amb same: already red -> no send and nothing saved");
+        check(same.update(4000, true, false, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb same: nothing restored");
+
+        // 5. Off (brightness == 1) or unknown status -> no send.
+        AmbientSportController off = new AmbientSportController();
+        check(off.update(0, true, true, blue, CarLog.SML_BRIGHTNESS_OFF) == AmbientSportController.NO_COMMAND
+                && off.savedOriginal() == AmbientSportController.UNKNOWN_COLOR, "amb off: brightness 1 -> no send");
+        check(off.update(1000, true, true, AmbientSportController.UNKNOWN_COLOR, -1) == AmbientSportController.NO_COMMAND,
+                "amb unknown: both unknown -> no send");
+        check(off.update(2000, true, true, blue, -1) == AmbientSportController.NO_COMMAND,
+                "amb unknown: brightness unknown -> no send");
+        check(off.update(3000, true, true, AmbientSportController.UNKNOWN_COLOR, 6) == AmbientSportController.NO_COMMAND,
+                "amb unknown: color unknown -> no send");
+        check(off.update(4000, true, true, blue, 2) == AmbientSportController.RED && off.savedOriginal() == blue,
+                "amb on: brightness 2 sends red");
+
+        // 6. Misses -> halt (2 misses).
+        AmbientSportController halt = new AmbientSportController();
+        check(halt.update(0, true, true, blue, 6) == AmbientSportController.RED, "amb halt: first send");
+        check(halt.update(3000, true, true, blue, 6) == AmbientSportController.RED
+                && halt.misses() == 1 && !halt.isHalted(), "amb halt: 1st miss retries");
+        check(halt.update(6000, true, true, blue, 6) == AmbientSportController.NO_COMMAND
+                && halt.misses() == 2 && halt.isHalted(), "amb halt: 2nd miss halts");
+        check(halt.update(20000, true, true, blue, 6) == AmbientSportController.NO_COMMAND && halt.isHalted(),
+                "amb halt: stays halted");
+        halt.clearHalt();
+        check(!halt.isHalted() && halt.misses() == 0, "amb halt: clearHalt resets");
+
+        // 7. Option off restores immediately (respecting 3 s gap).
+        AmbientSportController optOff = new AmbientSportController();
+        check(optOff.update(0, true, true, blue, 6) == AmbientSportController.RED, "amb optOff: start");
+        check(optOff.update(300, true, true, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb optOff: confirmed");
+        check(optOff.update(1000, false, true, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND,
+                "amb optOff: rate-limited within 3 s");
+        check(optOff.update(3000, false, true, AmbientSportController.RED, 6) == blue
+                && AmbientSportController.REASON_OPTION_OFF.equals(optOff.lastReason())
+                && optOff.savedOriginal() == AmbientSportController.UNKNOWN_COLOR, "amb optOff: restores at 3 s");
+
+        // 8. Restart restore from saved hex.
+        long saved = AmbientSportController.parseHex("009b002100ef");
+        AmbientSportController restart = new AmbientSportController(AmbientSportController.DEFAULT_RELEASE_MS, saved);
+        check(restart.savedOriginal() == blue, "amb restart: persisted hex loaded");
+        check(restart.update(0, true, false, AmbientSportController.UNKNOWN_COLOR, -1) == AmbientSportController.NO_COMMAND
+                && restart.savedOriginal() == blue, "amb restart: waits for known status");
+        check(restart.update(500, true, false, AmbientSportController.RED, 6) == blue
+                && AmbientSportController.REASON_RESTORE_RESTART.equals(restart.lastReason())
+                && restart.savedOriginal() == AmbientSportController.UNKNOWN_COLOR,
+                "amb restart: restores original when not sport and at red");
+
+        // 9. Factory theme original (hi 0x01) restored with exact bytes.
+        AmbientSportController th = new AmbientSportController();
+        check(th.update(0, true, true, theme, 8) == AmbientSportController.RED && th.savedOriginal() == theme,
+                "amb theme: saves factory theme original");
+        check(th.update(300, true, true, AmbientSportController.RED, 8) == AmbientSportController.NO_COMMAND,
+                "amb theme: confirmed");
+        long restored = th.update(4000, true, false, AmbientSportController.RED, 8);
+        check(restored == theme, "amb theme: restores exact packed theme value");
+        byte[] tr = AmbientSportController.redBytes(restored);
+        byte[] tg = AmbientSportController.greenBytes(restored);
+        byte[] tb = AmbientSportController.blueBytes(restored);
+        check(tr[0] == 1 && (tr[1] & 0xff) == 0x6b
+                && tg[0] == 1 && (tg[1] & 0xff) == 0x5a
+                && tb[0] == 1 && (tb[1] & 0xff) == 0x95, "amb theme: exact hi=0x01 bytes restored");
     }
 
 }

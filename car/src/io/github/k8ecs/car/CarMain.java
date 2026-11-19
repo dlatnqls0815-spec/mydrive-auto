@@ -9,6 +9,7 @@ import android.os.Parcel;
 import android.os.ParcelFileDescriptor;
 
 import io.github.k8ecs.core.AccelLateral;
+import io.github.k8ecs.core.AmbientSportController;
 import io.github.k8ecs.core.CarLog;
 import io.github.k8ecs.core.ClusterThemeController;
 import io.github.k8ecs.core.DampingController;
@@ -47,7 +48,7 @@ import java.util.UUID;
  * moving forward. Settings over 127.0.0.1 TCP (head unit app) and Bluetooth RFCOMM (phone).
  */
 public final class CarMain {
-    static final String VERSION = "0.4.6";
+    static final String VERSION = "0.4.7";
     /** BCM getSpeed_KMHUnit() returns the display speed raw value in 0.5 km/h steps (65 = 32.5 km/h on the cluster). */
     static final float BCM_SPEED_RAW_PER_KMH = 2f;
     static final String LOG_DIR = "/data/nemesis/logs/k8ecs.damping";
@@ -68,6 +69,7 @@ public final class CarMain {
     private DampingController steerController;  // steering
     private PedalController pedalController;    // powertrain
     private ClusterThemeController clusterController; // instrument cluster sport theme
+    private AmbientSportController ambController;     // factory ambient light sport red
     /** Car model profile from ro.build.product (core/VehicleProfile; add new cars there). */
     private final String product = systemProp("ro.build.product");
     private final VehicleProfile profile = VehicleProfile.forProduct(product);
@@ -95,6 +97,11 @@ public final class CarMain {
     private int savedClusterOrig = -1; // original cluster theme from state.txt
     private int clusterTheme = -1;  // current cluster theme raw value (1..4), -1 unknown
     private int clusterAutoSet = -1; // stock drive-mode-link cluster theme status (read-only), -1 unknown
+    private long savedAmbOrig = AmbientSportController.UNKNOWN_COLOR; // original ambient color from state.txt
+    private long ambColor = AmbientSportController.UNKNOWN_COLOR;     // current 6-byte ambient color, -1 unknown
+    private int ambBrightness = -1;  // byte 6 of SYS_SML_STATUS_M_RESP (1 off, 2..11 level 1..10), -1 unknown
+    private int ambLink = -1;        // byte 8 of SYS_SML_STATUS_M_RESP (1 off, 2 on), -1 unknown
+    private boolean ambUnknownLogged;
     private boolean ignitionOn = true; // set false on SYS_IGN_STATUS_M: 0, true on : 1 or kmh > 0
     private String usmServiceName;  // discovered IUSMService name (logged once)
     private boolean usmMissingLogged;
@@ -174,8 +181,10 @@ public final class CarMain {
                 Log.i("no saved drive mode: eco");
             }
         }
+        IBinder sys = null;
         try {
-            int[] fb = Binder.feedbacks(Binder.service("com.hkmc.micom.system"));
+            sys = Binder.service("com.hkmc.micom.system");
+            int[] fb = Binder.feedbacks(sys);
             if (fb == null) throw new IOException("layout");
             synchronized (lock) {
                 for (Channel c : channels()) {
@@ -187,6 +196,14 @@ public final class CarMain {
             }
         } catch (Exception e) {
             Log.i("item state at start unknown: " + e);
+        }
+        if (sys != null) {
+            try {
+                Binder.requestSMLStatus(sys);
+                Log.i("ambient status requested at start");
+            } catch (Exception e) {
+                Log.i("ambient status request at start failed: " + e);
+            }
         }
         try {
             Binder.ServiceRef usm = Binder.findUsm(null);
@@ -286,6 +303,10 @@ public final class CarMain {
                         if (ClusterThemeController.isValidTheme(v)) savedClusterOrig = v;
                     } catch (NumberFormatException ignored) { }
                 }
+                if (tok.startsWith("ambOrig=")) {
+                    long v = AmbientSportController.parseHex(tok.substring(8));
+                    if (AmbientSportController.isValidColor(v)) savedAmbOrig = v;
+                }
             }
         }
         synchronized (lock) {
@@ -299,10 +320,15 @@ public final class CarMain {
         if (!Double.isNaN(savedAccelAngle)) Log.i("accel direction restored " + savedAccelAngle);
         if (savedClusterOrig > 0) Log.i("cluster original theme restored " + savedClusterOrig
                 + " (" + ClusterThemeController.themeLetter(savedClusterOrig) + ")");
+        if (AmbientSportController.isValidColor(savedAmbOrig)) {
+            Log.i("ambient original color restored " + AmbientSportController.toHex(savedAmbOrig));
+        }
     }
 
     String apply(String pairs) {
         synchronized (lock) {
+            boolean prevAmbFlag = settings.ambOn;
+            boolean prevAmbOn = ambOnLocked();
             Settings next = Settings.parse(pairs, settings);
             Files.write(new File(DIR, "config.txt"), next.encode().replace(' ', '\n') + "\n");
             settings = next;
@@ -317,6 +343,15 @@ public final class CarMain {
                     if (fb != null) onFeedbackLocked(eng, fb[eng.item]);
                 } catch (Exception e) {
                     Log.i("powertrain re-read failed: " + e);
+                }
+            }
+            if ((!prevAmbFlag && next.ambOn) || (!prevAmbOn && ambOnLocked())) {
+                ambUnknownLogged = false;
+                try {
+                    Binder.requestSMLStatus(Binder.service("com.hkmc.micom.system"));
+                    Log.i("ambient status requested on enable");
+                } catch (Exception e) {
+                    Log.i("ambient status request failed: " + e);
                 }
             }
             return next.encode();
@@ -345,10 +380,19 @@ public final class CarMain {
         } else if (clusterController.isHalted()) {
             clusterController.clearHalt();
         }
+        if (ambController == null) {
+            ambController = new AmbientSportController(AmbientSportController.DEFAULT_RELEASE_MS, savedAmbOrig);
+        } else if (ambController.isHalted()) {
+            ambController.clearHalt();
+        }
     }
 
     boolean clusterOnLocked() {
         return settings.enabled && settings.clusterOn;
+    }
+
+    boolean ambOnLocked() {
+        return settings.enabled && settings.ambOn;
     }
 
     /** Stock Sport mode (0x03), or My Drive with at least one item confirmed in its sport step by car feedback. */
@@ -371,6 +415,16 @@ public final class CarMain {
         }
         if (!clusterOnLocked()) return "off";
         if (clusterAutoSet == CarLog.CLUSTER_LINK_ON) return "link_on";
+        return "waiting";
+    }
+
+    String ambStateLocked() {
+        if (ambController != null && ambController.isHalted()) return "halted";
+        if (ambController != null && ambController.savedOriginal() != AmbientSportController.UNKNOWN_COLOR) {
+            return "sport_orig_" + AmbientSportController.toHex(ambController.savedOriginal());
+        }
+        if (!ambOnLocked()) return "off";
+        if (ambBrightness < 0 || ambColor == AmbientSportController.UNKNOWN_COLOR) return "unknown";
         return "waiting";
     }
 
@@ -482,6 +536,8 @@ public final class CarMain {
         if (mode > 0) b.append("driveMode=").append(mode).append(' ');
         int clusterOrig = clusterController != null ? clusterController.savedOriginal() : savedClusterOrig;
         if (ClusterThemeController.isValidTheme(clusterOrig)) b.append("clusterOrig=").append(clusterOrig).append(' ');
+        long ambOrig = ambController != null ? ambController.savedOriginal() : savedAmbOrig;
+        if (AmbientSportController.isValidColor(ambOrig)) b.append("ambOrig=").append(AmbientSportController.toHex(ambOrig)).append(' ');
         StringBuilder fm = new StringBuilder();
         for (Channel c : channels())
             for (Map.Entry<String, Integer> e : c.learned.entrySet())
@@ -553,6 +609,7 @@ public final class CarMain {
                     // Ignition off: the car comes back in ECO next time.
                     mode = CarLog.MODE_ECO;
                     if (clusterController != null) clusterController.onIgnitionOff();
+                    if (ambController != null) ambController.onIgnitionOff();
                     Log.i("ignition off, next start eco");
                     saveStateLocked();
                 }
@@ -576,6 +633,24 @@ public final class CarMain {
                 if (ct != clusterTheme) {
                     clusterTheme = ct;
                     Log.i("cluster theme " + ct + " (" + ClusterThemeController.themeLetter(ct) + ")");
+                }
+            }
+            return;
+        }
+        byte[] sml = CarLog.smlStatus(line);
+        if (sml != null) {
+            long color = AmbientSportController.packColor(sml);
+            int bri = sml[6] & 0xff;
+            int link = sml[8] & 0xff;
+            synchronized (lock) {
+                boolean changed = color != ambColor || bri != ambBrightness || link != ambLink;
+                ambColor = color;
+                ambBrightness = bri;
+                ambLink = link;
+                ambUnknownLogged = false;
+                if (changed) {
+                    Log.i("ambient status rgb=" + AmbientSportController.toHex(color)
+                            + " bri=" + bri + " link=" + link);
                 }
             }
             return;
@@ -731,6 +806,8 @@ public final class CarMain {
                 int n = 0;
                 int clusterCmd = ClusterThemeController.NO_COMMAND;
                 String clusterWhy = null;
+                long ambCmd = AmbientSportController.NO_COMMAND;
+                String ambWhy = null;
                 synchronized (lock) {
                     kmh = Math.round(v);
                     kmhExact = v;
@@ -803,6 +880,35 @@ public final class CarMain {
                             clusterWhy = clusterController.lastReason();
                         }
                     }
+                    if (sys != null && ignitionOn && ambController != null) {
+                        boolean ambActive = ambOnLocked()
+                                || ambController.savedOriginal() != AmbientSportController.UNKNOWN_COLOR
+                                || ambController.hasPending();
+                        if (ambActive && (ambBrightness < 0 || ambColor == AmbientSportController.UNKNOWN_COLOR)) {
+                            if (!ambUnknownLogged) {
+                                ambUnknownLogged = true;
+                                Log.i("ambient status unknown");
+                            }
+                        }
+                        int prevMisses = ambController.misses();
+                        boolean prevHalted = ambController.isHalted();
+                        long prevOrig = ambController.savedOriginal();
+                        ambCmd = ambController.update(now, ambOnLocked(), isSportActiveLocked(), ambColor, ambBrightness);
+                        if (ambController.misses() > prevMisses) {
+                            Log.i("no feedback for ambient " + AmbientSportController.toHex(ambController.lastMissedColor())
+                                    + " (" + ambController.misses() + ")");
+                        }
+                        if (!prevHalted && ambController.isHalted()) {
+                            Log.i("HALT ambient: no feedback twice");
+                        }
+                        if (ambController.savedOriginal() != prevOrig) {
+                            savedAmbOrig = ambController.savedOriginal();
+                            saveStateLocked();
+                        }
+                        if (ambCmd != AmbientSportController.NO_COMMAND) {
+                            ambWhy = ambController.lastReason();
+                        }
+                    }
                     if (now - lastSummary > 10000 && kmh > 0) {
                         lastSummary = now;
                         Log.i("drive " + statusLocked());
@@ -820,6 +926,18 @@ public final class CarMain {
                     } catch (Exception e) {
                         usm = null;
                         Log.i("cluster theme send failed: " + e);
+                    }
+                }
+                if (ambCmd != AmbientSportController.NO_COMMAND && sys != null) {
+                    try {
+                        Binder.setSMLRGB(sys,
+                                AmbientSportController.redBytes(ambCmd),
+                                AmbientSportController.greenBytes(ambCmd),
+                                AmbientSportController.blueBytes(ambCmd));
+                        Log.i("AMBIENT rgb " + AmbientSportController.toHex(ambCmd) + " (" + ambWhy + ")");
+                    } catch (Exception e) {
+                        sys = null;
+                        Log.i("ambient rgb send failed: " + e);
                     }
                 }
             } catch (Exception e) {
@@ -855,6 +973,8 @@ public final class CarMain {
                 + " cluster=" + clusterStateLocked()
                 + " clusterTheme=" + (ClusterThemeController.isValidTheme(clusterTheme) ? Integer.toString(clusterTheme) : "?")
                 + " clusterAutoSet=" + (clusterAutoSet >= 0 ? Integer.toString(clusterAutoSet) : "?")
+                + " amb=" + ambStateLocked()
+                + " ambRgb=" + AmbientSportController.toHex(ambColor)
                 + " imu=" + imuState.replace(' ', '_')
                 + " frames=" + imuFrames + " gyroScale=" + scale + " turns=" + gyro.segmentCount()
                 + " bias=" + (Double.isNaN(gyro.bias()) ? "?" : String.format(Locale.US, "%.1f", gyro.bias()))
@@ -1114,6 +1234,38 @@ public final class CarMain {
                 d.writeInt(item);
                 d.writeInt(value);
                 sys.transact(0x30, d, r, 0);
+                r.readException();
+            } finally { d.recycle(); r.recycle(); }
+        }
+
+        private static void validateSmlChannel(byte[] ch) {
+            if (ch == null || ch.length != 2) throw new IllegalArgumentException("sml channel length");
+            int hi = ch[0] & 0xff;
+            if (hi != 0x00 && hi != 0x01) throw new IllegalArgumentException("sml channel hi " + hi);
+        }
+
+        /** ISystemService.requestSMLStatus(), transaction 0x4c (read-only; car logs SYS_SML_STATUS_M_RESP). */
+        static void requestSMLStatus(IBinder sys) throws Exception {
+            Parcel d = Parcel.obtain(), r = Parcel.obtain();
+            try {
+                d.writeInterfaceToken("com.hkmc.micom.ISystemService");
+                sys.transact(0x4c, d, r, 0);
+                r.readException();
+            } finally { d.recycle(); r.recycle(); }
+        }
+
+        /** ISystemService.setSMLRGB(byte[], byte[], byte[]), transaction 0x4e. Each array is {hi, lo} with hi 0x00 or 0x01. */
+        static void setSMLRGB(IBinder sys, byte[] red, byte[] green, byte[] blue) throws Exception {
+            validateSmlChannel(red);
+            validateSmlChannel(green);
+            validateSmlChannel(blue);
+            Parcel d = Parcel.obtain(), r = Parcel.obtain();
+            try {
+                d.writeInterfaceToken("com.hkmc.micom.ISystemService");
+                d.writeByteArray(red);
+                d.writeByteArray(green);
+                d.writeByteArray(blue);
+                sys.transact(0x4e, d, r, 0);
                 r.readException();
             } finally { d.recycle(); r.recycle(); }
         }

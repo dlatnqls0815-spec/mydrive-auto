@@ -31,6 +31,11 @@ public final class CarLog {
             "\\b(?:Cluster_ThemeAutoSetStatus|nThemeAutoSetStatus)\\s*:\\s*(\\d+)");
     /** Stock cluster "drive mode link" status: 1 off, 2 on (K8, seen on the car 2026-11-20). */
     public static final int CLUSTER_LINK_OFF = 1, CLUSTER_LINK_ON = 2;
+    private static final String SML_STATUS = "SYS_SML_STATUS_M_RESP:";
+    /** Ambient light brightness raw byte (byte 6): 1 = off, 2..11 = level 1..10. */
+    public static final int SML_BRIGHTNESS_OFF = 1;
+    /** Factory "ambient follows drive mode" link byte (byte 8): 1 = off, 2 = on. */
+    public static final int SML_LINK_OFF = 1, SML_LINK_ON = 2;
 
     /** Drive mode byte (byte 2) of a drive mode report; 0 (in transition) and 0x0f (boot) return -1. */
     public static int driveMode(String line) {
@@ -162,5 +167,31 @@ public final class CarLog {
         } catch (NumberFormatException e) {
             return -1;
         }
+    }
+
+    /**
+     * Parses a SystemService {@code SYS_SML_STATUS_M_RESP:} line into its 9+ raw bytes, or returns null.
+     * Bytes 0..5 = red hi/lo, green hi/lo, blue hi/lo; byte 6 = brightness raw (1 off, 2..11 level 1..10);
+     * byte 7 = dim while driving; byte 8 = drive-mode link (1 off, 2 on).
+     */
+    public static byte[] smlStatus(String line) {
+        if (line == null) return null;
+        int at = line.indexOf(SML_STATUS);
+        if (at < 0) return null;
+        String rest = line.substring(at + SML_STATUS.length()).trim();
+        if (rest.isEmpty()) return null;
+        String[] p = rest.split("\\s+");
+        if (p.length < 9) return null;
+        byte[] out = new byte[p.length];
+        for (int i = 0; i < p.length; i++) {
+            try {
+                int v = Integer.decode(p[i]);
+                if (v < 0 || v > 0xff) return null;
+                out[i] = (byte) v;
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+        return out;
     }
 }

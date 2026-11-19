@@ -8,8 +8,8 @@ choice setting=s_hy label=@s_hy when=s
 choice setting=s_co label=@s_co when=s
 choice setting=s_cf label=@s_cf when=s
 choice setting=s_dw label=@s_dw when=s
-toggle setting=s_eng label=@s_eng when=s
-toggle setting=s_str label=@s_str when=s
+toggle setting=s_eng label=@se when=s
+toggle setting=s_str label=@ss when=s
 toggle setting=h_on label=@h_on when=h
 choice setting=h_up label=@h_up when=h
 choice setting=h_hy label=@h_hy when=h
@@ -19,10 +19,11 @@ choice setting=h_dw label=@h_dw when=h
 toggle setting=e_on label=@e_on when=e
 choice setting=e_pd label=@e_pd when=e
 choice setting=e_hd label=@e_hd when=e
-toggle setting=e_sus label=@e_sus when=e
-toggle setting=e_str label=@e_str when=e
+toggle setting=e_sus label=@es when=e
+toggle setting=e_str label=@er when=e
 choice setting=mx label=@mx
+toggle setting=a_on label=@a_on
 toggle setting=c_on label=@c_on
 choice setting=c_th label=@c_th
 value label=@cf key=cf
-button name=save_log label=@save_log
+button name=save_log label=@sl

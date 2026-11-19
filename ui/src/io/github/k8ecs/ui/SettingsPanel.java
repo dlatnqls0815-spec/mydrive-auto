@@ -77,8 +77,8 @@ public final class SettingsPanel {
     private TextView speedValue, modeChip, footer;
     private MeterRow speedRow, latRow, pedalRow;
     private TextView[] itemState = new TextView[3], itemBadge = new TextView[3];
-    private boolean carKnowsEngNormal, carKnowsCluster;
-    private Toggle enabled, suspOn, steerOn, engOn, engNormal, suspLinkEng, suspLinkSteer, engLinkSusp, engLinkSteer, clusterOn;
+    private boolean carKnowsEngNormal, carKnowsCluster, carKnowsAmb;
+    private Toggle enabled, suspOn, steerOn, engOn, engNormal, suspLinkEng, suspLinkSteer, engLinkSusp, engLinkSteer, clusterOn, ambOn;
     private Choice clusterTheme;
     private Stepper speedUp, hyst, cornerOn, cornerOff, dwell, maxPerMin;
     private Stepper steerSpeedUp, steerHyst, steerCornerOn, steerCornerOff, steerDwell;
@@ -90,7 +90,7 @@ public final class SettingsPanel {
     private final TextView[] pageButtons = new TextView[6];
     private View mainPage, settingsArea, toolsPage, clusterCard;
     private final View[] linkCards = new View[3];
-    private TextView statusPill, reasonText, mainMessage, topSave, clusterStatus;
+    private TextView statusPill, reasonText, mainMessage, topSave, clusterStatus, ambStatus;
     private volatile boolean polling;
     private boolean loaded, filling, dirty, wide, forceDark;
     private volatile boolean saving;
@@ -172,6 +172,7 @@ public final class SettingsPanel {
                 toggleRow(engLinkSteer, "핸들도 스포츠로", "엔진이 스포츠가 될 때", 15),
         });
 
+        ambOn = new Toggle();
         clusterOn = new Toggle();
         clusterTheme = new Choice(new String[] {"테마 A", "테마 B", "테마 C", "테마 D"});
         clusterCard = buildClusterCard();
@@ -289,7 +290,7 @@ public final class SettingsPanel {
         LinearLayout seg = new LinearLayout(activity);
         seg.setPadding(dp(4), dp(4), dp(4), dp(4));
         seg.setBackgroundDrawable(round(c.line, dp(12)));
-        String[] names = {"메인", "서스펜션", "핸들", "엔진", "클러스터", "도구"};
+        String[] names = {"메인", "서스펜션", "핸들", "엔진", "스포츠 표시", "도구"};
         for (int p = 0; p < 6; p++) {
             final int which = p;
             TextView b = text(names[p], 16, c.muted, MEDIUM);
@@ -635,10 +636,15 @@ public final class SettingsPanel {
 
     private LinearLayout buildClusterCard() {
         LinearLayout card = card();
-        card.addView(sectionLabel("클러스터"));
-        card.addView(toggleRow(clusterOn, "스포츠일 때 클러스터 테마 바꾸기",
-                "스포츠 모드이거나 마이 드라이브에서 엔진·서스펜션·핸들 중 하나라도 스포츠면 고른 테마로 바꾸고, 끝나면 원래 테마로 돌려놓아요.", 15));
+        card.addView(sectionLabel("스포츠 표시"));
+        card.addView(toggleRow(ambOn, "스포츠일 때 앰비언트 빨강",
+                "스포츠 모드이거나 마이 드라이브에서 엔진·서스펜션·핸들 중 하나라도 스포츠면 차량 앰비언트를 빨강으로 바꾸고, 끝나면 바로 원래 색으로 돌려놓아요. 사제 조명은 차량 색을 그대로 따라가요.", 15));
+        ambStatus = text("", 12, c.muted, null);
+        ambStatus.setVisibility(View.GONE);
+        card.addView(ambStatus);
         card.addView(divider());
+        card.addView(toggleRow(clusterOn, "스포츠일 때 클러스터 테마 바꾸기",
+                "스포츠 모드이거나 마이 드라이브에서 엔진·서스펜션·핸들 중 하나라도 스포츠면 고른 테마로 바꾸고, 끝나면 바로 원래 테마로 돌려놓아요.", 15));
         card.addView(choiceRow(clusterTheme, "스포츠 테마", null));
         TextView note = text("순정 클러스터 설정의 '드라이브 모드 연동'을 꺼야 작동해요. 순정 메뉴에서 테마를 직접 고르면 연동이 꺼져요.", 12, c.muted, null);
         note.setLineSpacing(0, 1.15f);
@@ -756,7 +762,9 @@ public final class SettingsPanel {
                 + " engLinkSusp=" + engLinkSusp.bit() + " engLinkSteer=" + engLinkSteer.bit()
                 // Older car modules (0.4.3 and before) reject unknown keys: send them only when known or changed.
                 + (carKnowsCluster || clusterOn.on || clusterTheme.value != 1
-                        ? " clusterOn=" + clusterOn.bit() + " clusterTheme=" + clusterTheme.value : "");
+                        ? " clusterOn=" + clusterOn.bit() + " clusterTheme=" + clusterTheme.value : "")
+                // Older car modules (0.4.6 and before) reject unknown keys: send it only when known or on.
+                + (carKnowsAmb || ambOn.on ? " ambOn=" + ambOn.bit() : "");
         saveButton.setText("저장 중…");
         if (topSave != null) topSave.setText("저장 중…");
         saving = true;
@@ -836,6 +844,7 @@ public final class SettingsPanel {
         if (reply.contains("engHold")) return "엔진 유지 시간은 1~60초입니다.";
         if (reply.contains("unknown key: engNormal")) return "노멀 선택은 차량 모듈 0.4.1부터 됩니다. 차량 쪽을 먼저 올려 주세요.";
         if (reply.contains("unknown key: cluster")) return "클러스터 테마는 차량 모듈 0.4.5부터 됩니다. 차량 쪽을 먼저 올려 주세요.";
+        if (reply.contains("unknown key: ambOn")) return "앰비언트 스포츠 빨강은 차량 모듈 0.4.7부터 됩니다. 차량 쪽을 먼저 올려 주세요.";
         if (reply.contains("clusterTheme")) return "클러스터 테마는 A~D 중에서 골라야 합니다.";
         if (reply.contains("speedHysteresis")) return "여유는 3 이상이어야 합니다.";
         return reply;
@@ -857,6 +866,8 @@ public final class SettingsPanel {
         clusterOn.set("1".equals(m.get("clusterOn")));
         int ct = parse(m.get("clusterTheme"));
         clusterTheme.set(ct >= 1 && ct <= 4 ? ct : 1);
+        carKnowsAmb = m.containsKey("ambOn");
+        ambOn.set("1".equals(m.get("ambOn")));
         speedUp.set(parse(m.get("speedUp")));
         hyst.set(parse(m.get("hyst")));
         cornerOn.set(parse(m.get("cornerOn")) / 10);
@@ -961,6 +972,11 @@ public final class SettingsPanel {
         String last = String.valueOf(m.get("last")).replace('_', ' ').replace("speed ", "속도 ")
                 .replace("corner ", "코너 ").replace("pedal ", "엑셀 ").replace("link ", "연동 ")
                 .replace("stopped", "정차");
+        String amb = describeAmb(m);
+        if (ambStatus != null) {
+            ambStatus.setText(amb);
+            ambStatus.setVisibility(amb.length() > 0 ? View.VISIBLE : View.GONE);
+        }
         String cl = describeCluster(m);
         if (clusterStatus != null) {
             clusterStatus.setText(cl);
@@ -968,8 +984,29 @@ public final class SettingsPanel {
         }
         footer.setText("전환 " + m.get("sent") + "회" + ("-".equals(last) || "null".equals(last) ? "" : " · 마지막 " + last)
                 + " · 센서 보정 " + calib + ("ok".equals(m.get("imu")) ? "" : " · 센서 " + m.get("imu"))
+                + (amb.length() > 0 ? " · " + amb : "")
                 + (cl.length() > 0 ? " · " + cl : "")
                 + (m.get("profile") != null ? " · 차종 프로필 " + m.get("profile") : ""));
+    }
+
+    static String describeAmb(Map<String, String> m) {
+        String st = m.get("amb");
+        if (st == null) return "";
+        String state;
+        if ("off".equals(st)) {
+            state = "꺼짐";
+        } else if ("waiting".equals(st)) {
+            state = "대기";
+        } else if ("halted".equals(st)) {
+            state = "멈춤(응답 없음)";
+        } else if ("unknown".equals(st)) {
+            state = "현재 상태 모름(앰비언트 설정을 한 번 바꾸면 읽혀요)";
+        } else if (st.startsWith("sport_orig_")) {
+            state = "빨강 (원래 색 저장됨)";
+        } else {
+            state = st;
+        }
+        return "앰비언트: " + state;
     }
 
     static String describeCluster(Map<String, String> m) {

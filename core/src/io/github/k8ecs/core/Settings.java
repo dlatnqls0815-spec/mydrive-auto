@@ -45,6 +45,8 @@ public final class Settings {
     // Cluster sport theme: switch cluster theme in Sport or when any My Drive item is in Sport.
     public final boolean clusterOn;
     public final int clusterTheme;    // 1..4 (theme A..D)
+    // Ambient sport red: switch factory ambient light to red in Sport or when any My Drive item is in Sport.
+    public final boolean ambOn;
 
     private Settings(Map<String, String> m) {
         enabled = flag(m, "enabled");
@@ -73,6 +75,7 @@ public final class Settings {
         suspLinkSteer = flag(m, "suspLinkSteer");
         clusterOn = flag(m, "clusterOn");
         clusterTheme = num(m, "clusterTheme");
+        ambOn = flag(m, "ambOn");
 
         speedRule("speedUp", speedUpKmh, hysteresisKmh, "speedHysteresis");
         speedRule("steerSpeedUp", steerSpeedUpKmh, steerHysteresisKmh, "steerHyst");
@@ -118,6 +121,7 @@ public final class Settings {
         m.put("suspLinkSteer", "0");
         m.put("clusterOn", "0");
         m.put("clusterTheme", "1");
+        m.put("ambOn", "0");
         return m;
     }
 
@@ -173,6 +177,7 @@ public final class Settings {
         m.put("suspLinkSteer", suspLinkSteer ? "1" : "0");
         m.put("clusterOn", clusterOn ? "1" : "0");
         m.put("clusterTheme", Integer.toString(clusterTheme));
+        m.put("ambOn", ambOn ? "1" : "0");
         return m;
     }
 
