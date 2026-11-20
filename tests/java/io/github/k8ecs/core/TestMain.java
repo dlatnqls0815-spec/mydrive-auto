@@ -727,6 +727,42 @@ public final class TestMain {
         check(imm.update(10000, true, false, AmbientSportController.RED, 6) == AmbientSportController.NO_COMMAND
                 && imm.isHalted() && imm.savedOriginal() == blue,
                 "amb imm: second missed restore halts and preserves the original for recovery");
+        check(imm.isWaitingForRecovery() && !imm.takeRecoveryStatusRequest(14999, true, false)
+                && imm.takeRecoveryStatusRequest(15000, true, false)
+                && !imm.takeRecoveryStatusRequest(15001, true, false),
+                "recovery: exactly one read at the five-second deadline");
+        check(imm.update(15100, true, false, AmbientSportController.RED, 6, 15000) == AmbientSportController.NO_COMMAND,
+                "recovery: cached red cannot authorize a send");
+        check(imm.update(15200, true, false, AmbientSportController.RED, 6, 15150) == blue
+                && SportOverrideController.REASON_RESTORE_RETRY.equals(imm.lastReason()),
+                "recovery: a fresh red response authorizes one final restore");
+        check(imm.update(18200, true, false, AmbientSportController.RED, 6, 18100) == AmbientSportController.NO_COMMAND
+                && imm.isRestoreFailed() && imm.savedOriginal() == blue
+                && !imm.takeRecoveryStatusRequest(25000, true, false),
+                "recovery: last miss stops automatic sends and preserves the original");
+
+        AmbientSportController noReadback = new AmbientSportController();
+        noReadback.update(0, true, true, theme, 6);
+        noReadback.update(300, true, true, AmbientSportController.RED, 6);
+        noReadback.update(4000, true, false, AmbientSportController.RED, 6);
+        noReadback.update(7000, true, false, AmbientSportController.RED, 6);
+        noReadback.update(10000, true, false, AmbientSportController.RED, 6);
+        check(!noReadback.takeRecoveryStatusRequest(15000, true, true)
+                && noReadback.takeRecoveryStatusRequest(16000, true, false)
+                && noReadback.update(19000, true, false, AmbientSportController.RED, 6, 15000) == AmbientSportController.NO_COMMAND
+                && noReadback.isRestoreFailed(),
+                "recovery: no stale resend during sport or after a readback timeout");
+
+        AmbientSportController manualRecovery = new AmbientSportController();
+        manualRecovery.update(0, true, true, theme, 6);
+        manualRecovery.update(300, true, true, AmbientSportController.RED, 6);
+        manualRecovery.update(4000, true, false, AmbientSportController.RED, 6);
+        manualRecovery.update(7000, true, false, AmbientSportController.RED, 6);
+        manualRecovery.update(10000, true, false, AmbientSportController.RED, 6);
+        check(manualRecovery.takeRecoveryStatusRequest(15000, true, false)
+                && manualRecovery.update(15200, true, false, blue, 6, 15100) == AmbientSportController.NO_COMMAND
+                && manualRecovery.savedOriginal() == AmbientSportController.UNKNOWN_COLOR,
+                "recovery: a driver-selected color wins");
 
         AmbientSportController lateEntry = new AmbientSportController(5000L);
         check(lateEntry.update(0, true, true, theme, 6) == AmbientSportController.RED, "late entry: send red");

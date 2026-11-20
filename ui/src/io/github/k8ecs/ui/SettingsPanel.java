@@ -1004,6 +1004,10 @@ public final class SettingsPanel {
             state = "꺼짐";
         } else if ("waiting".equals(st)) {
             state = "대기";
+        } else if ("restore_wait".equals(st)) {
+            state = "원래 색 복귀 재시도 대기";
+        } else if ("restore_failed".equals(st)) {
+            state = "복귀 실패 (도구 → 정지 해제에서 다시 시도)";
         } else if ("halted".equals(st)) {
             state = "멈춤(응답 없음)";
         } else if ("unknown".equals(st)) {

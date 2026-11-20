@@ -20,6 +20,8 @@ public final class SportOverrideController {
     public static final String REASON_SPORT_END = "sport end";
     public static final String REASON_OPTION_OFF = "option off";
     public static final String REASON_RESTORE_RESTART = "restore after restart";
+    public static final String REASON_RESTORE_RETRY = "delayed restore retry";
+    private static final long NO_TIME = Long.MIN_VALUE;
 
     private long releaseMs;
     private long savedOriginal = NO_VALUE;
@@ -34,12 +36,20 @@ public final class SportOverrideController {
     private long lastMissedValue = NO_VALUE;
     private int misses;
     private boolean halted;
+    private final long recoveryDelayMs;
+    private long recoveryAt = NO_TIME;
+    private long recoveryRequestedAt = NO_TIME;
 
     private long lastSendMs = Long.MIN_VALUE;
     private String lastReason = "";
 
     public SportOverrideController(long releaseMs, long persistedOriginal) {
+        this(releaseMs, persistedOriginal, 0);
+    }
+
+    SportOverrideController(long releaseMs, long persistedOriginal, long recoveryDelayMs) {
         setReleaseMs(releaseMs);
+        this.recoveryDelayMs = recoveryDelayMs;
         if (persistedOriginal >= 0) {
             this.savedOriginal = persistedOriginal;
             this.fromRestart = true;
@@ -58,18 +68,32 @@ public final class SportOverrideController {
     public long lastMissedValue() { return lastMissedValue; }
     public boolean hasPending() { return pendingValue != NO_VALUE; }
     public String lastReason() { return lastReason; }
+    boolean isWaitingForRecovery() { return recoveryAt != NO_TIME; }
+    boolean isRestoreFailed() {
+        return halted && !isWaitingForRecovery() && savedOriginal != NO_VALUE && lastMissedValue == savedOriginal;
+    }
+
+    boolean takeRecoveryStatusRequest(long nowMs, boolean enabled, boolean sportActive) {
+        if (!isWaitingForRecovery() || nowMs < recoveryAt || recoveryRequestedAt != NO_TIME
+                || (enabled && sportActive)) return false;
+        recoveryRequestedAt = nowMs;
+        return true;
+    }
 
     /** Clears a halt (for user resume / settings reload) while keeping any saved original value. */
     public void clearHalt() {
         halted = false;
         misses = 0;
         pendingValue = NO_VALUE;
+        clearRecovery();
     }
 
     /** Called when ignition goes off so an in-flight command does not falsely time out when IGN returns. */
     public void onIgnitionOff() {
+        if (hasPending() && REASON_RESTORE_RETRY.equals(lastReason)) recordTimeout();
         pendingValue = NO_VALUE;
         sportOffSinceMs = Long.MIN_VALUE;
+        recoveryRequestedAt = NO_TIME;
     }
 
     /**
@@ -83,6 +107,10 @@ public final class SportOverrideController {
      * @return value to send now, or {@link #NO_VALUE}
      */
     public long update(long nowMs, boolean enabled, long targetValue, boolean sportActive, long currentValue) {
+        return update(nowMs, enabled, targetValue, sportActive, currentValue, NO_TIME);
+    }
+
+    long update(long nowMs, boolean enabled, long targetValue, boolean sportActive, long currentValue, long statusAtMs) {
         if (targetValue < 0) return NO_VALUE;
 
         boolean known = currentValue >= 0;
@@ -114,8 +142,32 @@ public final class SportOverrideController {
                 return NO_VALUE;
             }
         }
-        if (halted) return NO_VALUE;
         long expectedApplied = appliedTarget != NO_VALUE ? appliedTarget : targetValue;
+        if (isWaitingForRecovery()) {
+            if (known && currentValue != expectedApplied) {
+                // A late restore or a driver-selected color has already superseded our red.
+                clearRecovery();
+                halted = false;
+                misses = 0;
+                savedOriginal = NO_VALUE;
+                appliedTarget = NO_VALUE;
+                fromRestart = false;
+                inSport = enabled && sportActive;
+                sportOffSinceMs = NO_TIME;
+            } else if (enabled && sportActive) {
+                recoveryRequestedAt = NO_TIME;
+            } else if (recoveryRequestedAt != NO_TIME) {
+                if (nowMs - recoveryRequestedAt >= PENDING_TIMEOUT_MS) {
+                    clearRecovery();
+                } else if (known && statusAtMs > recoveryRequestedAt && canSend(nowMs)) {
+                    clearRecovery();
+                    halted = false;
+                    return send(nowMs, savedOriginal, REASON_RESTORE_RETRY);
+                }
+            }
+            return NO_VALUE;
+        }
+        if (halted) return NO_VALUE;
 
         // 1. Pending feedback check.
         if (pendingValue != NO_VALUE) {
@@ -138,7 +190,11 @@ public final class SportOverrideController {
                 inSport = sportActive;
                 misses = 0;
             } else if (nowMs - pendingSinceMs >= PENDING_TIMEOUT_MS) {
+                boolean restore = pendingValue == savedOriginal;
                 recordTimeout();
+                if (restore && misses == MAX_MISSES && recoveryDelayMs > 0) {
+                    recoveryAt = nowMs + recoveryDelayMs;
+                }
                 if (halted) return NO_VALUE;
             } else {
                 // Keep tracking sport-off elapsed time while waiting for pending feedback.
@@ -267,6 +323,11 @@ public final class SportOverrideController {
         pendingValue = NO_VALUE;
         misses++;
         if (misses >= MAX_MISSES) halted = true;
+    }
+
+    private void clearRecovery() {
+        recoveryAt = NO_TIME;
+        recoveryRequestedAt = NO_TIME;
     }
 
     private long send(long nowMs, long value, String reason) {

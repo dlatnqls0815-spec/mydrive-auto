@@ -49,7 +49,7 @@ import java.util.UUID;
  * moving forward. Settings over 127.0.0.1 TCP (head unit app) and Bluetooth RFCOMM (phone).
  */
 public final class CarMain {
-    static final String VERSION = "0.4.9";
+    static final String VERSION = "0.4.10";
     /** BCM getSpeed_KMHUnit() returns the display speed raw value in 0.5 km/h steps (65 = 32.5 km/h on the cluster). */
     static final float BCM_SPEED_RAW_PER_KMH = 2f;
     static final String LOG_DIR = "/data/nemesis/logs/k8ecs.damping";
@@ -100,6 +100,7 @@ public final class CarMain {
     private int clusterAutoSet = -1; // stock drive-mode-link cluster theme status (read-only), -1 unknown
     private long savedAmbOrig = AmbientSportController.UNKNOWN_COLOR; // original ambient color from state.txt
     private long ambColor = AmbientSportController.UNKNOWN_COLOR;     // current 6-byte ambient color, -1 unknown
+    private long ambStatusAtMs = Long.MIN_VALUE;
     private int ambBrightness = -1;  // byte 6 of SYS_SML_STATUS_M_RESP (1 off, 2..11 level 1..10), -1 unknown
     private int ambLink = -1;        // byte 8 of SYS_SML_STATUS_M_RESP (1 off, 2 on), -1 unknown
     private boolean ambUnknownLogged;
@@ -422,6 +423,8 @@ public final class CarMain {
     }
 
     String ambStateLocked() {
+        if (ambController != null && ambController.isWaitingForRecovery()) return "restore_wait";
+        if (ambController != null && ambController.isRestoreFailed()) return "restore_failed";
         if (ambController != null && ambController.isHalted()) return "halted";
         if (ambController != null && ambController.savedOriginal() != AmbientSportController.UNKNOWN_COLOR) {
             return "sport_orig_" + AmbientSportController.toHex(ambController.savedOriginal());
@@ -648,6 +651,7 @@ public final class CarMain {
             synchronized (lock) {
                 boolean changed = color != ambColor || bri != ambBrightness || link != ambLink;
                 ambColor = color;
+                ambStatusAtMs = SystemClock.elapsedRealtime();
                 ambBrightness = bri;
                 ambLink = link;
                 ambUnknownLogged = false;
@@ -898,13 +902,15 @@ public final class CarMain {
                         int prevMisses = ambController.misses();
                         boolean prevHalted = ambController.isHalted();
                         long prevOrig = ambController.savedOriginal();
-                        ambCmd = ambController.update(displayNow, ambOnLocked(), isSportActiveLocked(), ambColor, ambBrightness);
+                        ambCmd = ambController.update(displayNow, ambOnLocked(), isSportActiveLocked(),
+                                ambColor, ambBrightness, ambStatusAtMs);
                         if (ambController.misses() > prevMisses) {
                             Log.i("no feedback for ambient " + AmbientSportController.toHex(ambController.lastMissedColor())
                                     + " (" + ambController.misses() + ")");
                         }
                         if (!prevHalted && ambController.isHalted()) {
-                            Log.i("HALT ambient: no feedback twice");
+                            Log.i(ambController.isWaitingForRecovery() ? "ambient restore retry scheduled"
+                                    : "HALT ambient: no feedback");
                         }
                         if (ambController.savedOriginal() != prevOrig) {
                             savedAmbOrig = ambController.savedOriginal();
@@ -945,12 +951,19 @@ public final class CarMain {
                         sys = null;
                         Log.i("ambient rgb send failed: " + e);
                     }
-                } else if (ambientReadbackAt != 0 && displayNow >= ambientReadbackAt && sys != null) {
-                    ambientReadbackAt = 0;
-                    try {
-                        Binder.requestSMLStatus(sys);
-                    } catch (Exception e) {
-                        Log.i("ambient status readback failed: " + e);
+                } else if (sys != null) {
+                    boolean recoveryReadback;
+                    synchronized (lock) {
+                        recoveryReadback = ignitionOn && ambController.takeRecoveryStatusRequest(
+                                SystemClock.elapsedRealtime(), ambOnLocked(), isSportActiveLocked());
+                    }
+                    if (recoveryReadback || (ambientReadbackAt != 0 && displayNow >= ambientReadbackAt)) {
+                        ambientReadbackAt = 0;
+                        try {
+                            Binder.requestSMLStatus(sys);
+                        } catch (Exception e) {
+                            Log.i("ambient status readback failed: " + e);
+                        }
                     }
                 }
             } catch (Exception e) {

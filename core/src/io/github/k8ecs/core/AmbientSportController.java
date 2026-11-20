@@ -19,6 +19,7 @@ public final class AmbientSportController {
     public static final long DEFAULT_RELEASE_MS = SportOverrideController.DEFAULT_RELEASE_MS;
     public static final long PENDING_TIMEOUT_MS = SportOverrideController.PENDING_TIMEOUT_MS;
     public static final long MIN_GAP_MS = SportOverrideController.MIN_GAP_MS;
+    public static final long RECOVERY_DELAY_MS = 5000L;
     public static final int MAX_MISSES = SportOverrideController.MAX_MISSES;
 
     public static final String REASON_SPORT_START = SportOverrideController.REASON_SPORT_START;
@@ -43,7 +44,7 @@ public final class AmbientSportController {
      */
     public AmbientSportController(long releaseMs, long persistedOriginal) {
         this.core = new SportOverrideController(releaseMs,
-                isValidColor(persistedOriginal) ? persistedOriginal : SportOverrideController.NO_VALUE);
+                isValidColor(persistedOriginal) ? persistedOriginal : SportOverrideController.NO_VALUE, RECOVERY_DELAY_MS);
         acceptPreviousRedOnStartup = isValidColor(persistedOriginal) && persistedOriginal != PREVIOUS_RED;
     }
 
@@ -107,6 +108,11 @@ public final class AmbientSportController {
     public long lastMissedColor() { return core.lastMissedValue(); }
     public boolean hasPending() { return core.hasPending(); }
     public String lastReason() { return core.lastReason(); }
+    public boolean isWaitingForRecovery() { return core.isWaitingForRecovery(); }
+    public boolean isRestoreFailed() { return core.isRestoreFailed(); }
+    public boolean takeRecoveryStatusRequest(long nowMs, boolean enabled, boolean sportActive) {
+        return core.takeRecoveryStatusRequest(nowMs, enabled, sportActive);
+    }
 
     public void clearHalt() { core.clearHalt(); }
     public void onIgnitionOff() { core.onIgnitionOff(); }
@@ -124,7 +130,12 @@ public final class AmbientSportController {
      * @return packed 6-byte color to send now, or {@link #NO_COMMAND}
      */
     public long update(long nowMs, boolean enabled, boolean sportActive, long currentColor, int brightnessRaw) {
-        if (brightnessRaw == CarLog.SML_BRIGHTNESS_OFF) return NO_COMMAND;
+        return update(nowMs, enabled, sportActive, currentColor, brightnessRaw, Long.MIN_VALUE);
+    }
+
+    public long update(long nowMs, boolean enabled, boolean sportActive, long currentColor, int brightnessRaw,
+                       long statusAtMs) {
+        if (brightnessRaw == CarLog.SML_BRIGHTNESS_OFF && !core.isWaitingForRecovery()) return NO_COMMAND;
         long cur = (brightnessRaw >= 2 && brightnessRaw <= 11 && isValidColor(currentColor))
                 ? currentColor : UNKNOWN_COLOR;
         if (cur != UNKNOWN_COLOR && acceptPreviousRedOnStartup) {
@@ -132,6 +143,6 @@ public final class AmbientSportController {
             if (cur == PREVIOUS_RED && core.savedOriginal() != UNKNOWN_COLOR) cur = RED;
             else acceptPreviousRedOnStartup = false;
         }
-        return core.update(nowMs, enabled, RED, sportActive, cur);
+        return core.update(nowMs, enabled, RED, sportActive, cur, statusAtMs);
     }
 }
